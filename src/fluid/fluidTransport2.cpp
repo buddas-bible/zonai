@@ -4,6 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <limits>
+#include <utility>
 
 namespace zonai::fluidDetail
 {
@@ -218,6 +219,155 @@ throughflowAudit consumeThroughflowPanel(
         outputUniform.swap( uniform );
     }
     return result;
+}
+
+tracerPanelResult consumeTracerPanels( const std::vector<double>& seed,
+    const std::vector<double>& initialVolume, const std::vector<double>& endpointVolume,
+    const std::vector<double>& outgoing, const std::vector<transportRepairFace>& faces, int panels )
+{
+    const std::size_t n = seed.size();
+    auto mass = seed;
+    double unserved = 0.0;
+    for( int panel = 0; panel < panels; ++panel )
+    {
+        const double alpha = static_cast<double>( panel ) / panels;
+        std::vector<double> capacity( n ), remaining = mass, received( n );
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            capacity[i] = ( 1.0 - alpha ) * initialVolume[i] + alpha * endpointVolume[i];
+            if( !std::isfinite( capacity[i] ) || capacity[i] < 0.0 )
+                throw std::runtime_error( "fluid transport: invalid panel capacity" );
+            unserved += std::max( 0.0, outgoing[i] / panels - capacity[i] );
+        }
+        for( const auto& f : faces )
+        {
+            if( f.amount == 0.0 ) continue;
+            const int donor = f.amount > 0.0 ? f.first : f.second;
+            const int recipient = f.amount > 0.0 ? f.second : f.first;
+            if( capacity[donor] <= 0.0 ) continue;
+            const double requested = mass[donor] * ( ( std::abs( f.amount ) / panels ) /
+                std::max( capacity[donor], outgoing[donor] / panels ) );
+            const double moved = std::min( remaining[donor], requested );
+            remaining[donor] -= moved;
+            received[recipient] += moved;
+        }
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            mass[i] = remaining[i] + received[i];
+            if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
+                throw std::runtime_error( "fluid transport: invalid scalar mass" );
+        }
+    }
+    return { std::move( mass ), unserved };
+}
+
+
+std::optional<hybridTracerResult> consumeHybridTransport(
+    const transportRepairResult& repair, const std::vector<double>& startVolume,
+    const std::vector<double>& seed, double cellArea,
+    const std::vector<transportFaceSample>& mapping,
+    const std::vector<transportPanel>& sampledPanels, double weightSum,
+    throughflowCommitMode mode )
+{
+    const std::size_t n = startVolume.size();
+    if( seed.size() != n || repair.ledger.size() != n ||
+        !std::isfinite( cellArea ) || cellArea <= 0.0 ||
+        ( mode != throughflowCommitMode::completeOnly && mode != throughflowCommitMode::allowPartial ) )
+        throw std::invalid_argument( "fluid transport: invalid interval input" );
+    double startTotal = 0.0, seedTotal = 0.0;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( !std::isfinite( startVolume[i] ) || startVolume[i] < 0.0 ||
+            !std::isfinite( repair.ledger[i] ) || repair.ledger[i] < 0.0 ||
+            !std::isfinite( seed[i] ) || seed[i] < 0.0 )
+            throw std::invalid_argument( "fluid transport: invalid interval state" );
+        startTotal += startVolume[i]; seedTotal += seed[i];
+    }
+    if( !std::isfinite( startTotal ) || !std::isfinite( seedTotal ) )
+        throw std::invalid_argument( "fluid transport: interval total overflow" );
+    std::vector<double> outgoing( n );
+    for( const auto& f : repair.faces )
+    {
+        if( f.first < 0 || f.second < 0 || f.first == f.second ||
+            static_cast<std::size_t>( f.first ) >= n ||
+            static_cast<std::size_t>( f.second ) >= n || !std::isfinite( f.amount ) )
+            throw std::invalid_argument( "fluid transport: invalid interval face" );
+        auto& demand = outgoing[f.amount >= 0.0 ? f.first : f.second];
+        demand += std::abs( f.amount );
+        if( !std::isfinite( demand ) )
+            throw std::runtime_error( "fluid transport: interval demand overflow" );
+    }
+    if( rebuildTransportLedger( startVolume, repair.faces ) != repair.ledger )
+        throw std::invalid_argument( "fluid transport: inconsistent repaired ledger" );
+    bool singlePanel = true;
+    for( std::size_t i = 0; i < n; ++i )
+        if( outgoing[i] > startVolume[i] ) { singlePanel = false; break; }
+
+    auto mass = seed;
+    auto volume = startVolume, uniform = startVolume;
+    int panels = 1, maxPasses = 1, totalPasses = 1;
+    double unserved = 0.0, transferError = 0.0;
+    if( singlePanel )
+    {
+        auto single = consumeTracerPanels( mass, startVolume, repair.ledger,
+            outgoing, repair.faces, 1 );
+        if( single.unserved != 0.0 )
+            throw std::runtime_error( "fluid transport: unsupported fast path" );
+        mass = std::move( single.mass );
+        volume = repair.ledger;
+    }
+    else
+    {
+        if( sampledPanels.empty() || mapping.size() != repair.faces.size() ||
+            !std::isfinite( weightSum ) || weightSum <= 0.0 ||
+            sampledPanels.size() > static_cast<std::size_t>( std::numeric_limits<int>::max() / 8 ) )
+            throw std::invalid_argument( "fluid transport: missing or invalid interval schedule" );
+        panels = static_cast<int>( sampledPanels.size() );
+        maxPasses = totalPasses = 0;
+        std::vector<double> sums( mapping.size() );
+        for( const auto& panel : sampledPanels )
+        {
+            const auto amounts = buildTransportPanelAmounts( repair.faces, mapping,
+                panel.uOpen, panel.vOpen, panel.weight, weightSum );
+            for( std::size_t j = 0; j < mapping.size(); ++j )
+                sums[j] += amounts[j];
+            const auto result = consumeThroughflowPanel( repair.faces, amounts, volume, mass, uniform, mode );
+            if( !result.committed ) return std::nullopt;
+            maxPasses = std::max( maxPasses, result.passes );
+            totalPasses += result.passes;
+            unserved += result.unserved;
+            for( std::size_t i = 0; i < n; ++i )
+                if( std::abs( uniform[i] - volume[i] ) > 1.0e-12 * cellArea )
+                    throw std::runtime_error( "fluid transport: uniform executed volume identity failed" );
+        }
+        double transferL1 = 0.0;
+        for( std::size_t j = 0; j < sums.size(); ++j )
+        {
+            transferError += std::abs( sums[j] - repair.faces[j].amount );
+            transferL1 += std::abs( repair.faces[j].amount );
+        }
+        if( !std::isfinite( transferL1 ) || !std::isfinite( transferError ) ||
+            transferError > 1.0e-12 * std::max( transferL1, 1.0e-12 ) )
+            throw std::runtime_error( "fluid transport: sampled schedule differs from interval requests" );
+    }
+    double totalMass = 0.0, totalVolume = 0.0, modelGap = 0.0;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( !std::isfinite( mass[i] ) || mass[i] < 0.0 ||
+            !std::isfinite( volume[i] ) || volume[i] < 0.0 )
+            throw std::runtime_error( "fluid transport: invalid interval output" );
+        totalMass += mass[i]; totalVolume += volume[i];
+        modelGap += std::abs( volume[i] - repair.ledger[i] );
+    }
+    const double tolerance = 1.0e-12 * std::max( 1.0, startTotal );
+    if( !std::isfinite( totalMass ) || !std::isfinite( totalVolume ) ||
+        !std::isfinite( modelGap ) || !std::isfinite( unserved ) ||
+        std::abs( totalMass - seedTotal ) > 1.0e-12 * std::max( 1.0, seedTotal ) ||
+        std::abs( totalVolume - startTotal ) > tolerance ||
+        modelGap > 2.0 * unserved + tolerance )
+        throw std::runtime_error( "fluid transport: interval conservation audit failed" );
+    return hybridTracerResult{ std::move( mass ), std::move( volume ), panels,
+        maxPasses, totalPasses, unserved, transferError };
 }
 
 }
