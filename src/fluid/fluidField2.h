@@ -28,6 +28,7 @@ struct intervalPressureLinearOptions;
 struct intervalPressureLinearState;
 struct intervalPressureOperator;
 struct intervalPressureDefect;
+struct intervalPressureDefectResult;
 }
 
 
@@ -855,6 +856,11 @@ private:
         fluidField2& defectGeometry, const fluidDetail::intervalPressureOperator& op,
         std::span<const double> pressure, std::span<const fluidObstacleForce2> baselineFeedback,
         int targetIndex ) const;
+    // Bounded deterministic backtracking; only the accepted pressure and
+    // its traction are returned. No mutation of the frozen source field.
+    [[nodiscard]] fluidDetail::intervalPressureDefectResult correctIntervalPressureDefect(
+        const fluidDetail::intervalPressureOperator& op, std::span<const double> pressure,
+        std::span<const fluidObstacleForce2> baselineFeedback, int targetIndex, int correctionBudget ) const;
     void remapExposedFaces();
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
