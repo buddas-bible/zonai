@@ -1932,60 +1932,6 @@ struct fluidStateTraceProbe2
         // Solve P A P dp = -P(volume defect)/dt^2 with the unchanged
         // positive operator. The real endpoint derivative is only
         // approximated by the averaged B, so verify the actual new defect.
-        const auto solveCorrection = [&]( const std::vector<double>& error,
-            std::vector<double>& correction, int& steps, double& relativeSquared )
-        {
-            std::vector<double> b( n ), residual( n ), pre( n ), direction( n ), product( n );
-            for( std::size_t i = 0; i < n; ++i ) b[i] = -error[i] / ( dt * dt );
-            pressureOperator.project( b );
-            residual = b;
-            const double initialSquared = dot( b, b );
-            const double limit = std::max( 1.0e-24, initialSquared * 1.0e-16 );
-            const auto applyPre = [&]()
-            {
-                for( std::size_t i = 0; i < n; ++i )
-                    pre[i] = diagonal[i] > 0.0 ? residual[i] / diagonal[i] : 0.0;
-                pressureOperator.project( pre );
-            };
-            correction.assign( n, 0.0 );
-            applyPre();
-            direction = pre;
-            double rz = dot( residual, pre ), norm = initialSquared;
-            for( steps = 0; steps < 2000 && norm > limit; )
-            {
-                pressureOperator.multiply( direction, product ); pressureOperator.project( product );
-                const double denominator = dot( direction, product );
-                if( !std::isfinite( denominator ) || denominator <= 0.0 ||
-                    !std::isfinite( rz ) || rz <= 0.0 )
-                    throw std::runtime_error( defectKey + " correction PCG breakdown" );
-                const double alpha = rz / denominator;
-                for( std::size_t i = 0; i < n; ++i )
-                {
-                    correction[i] += alpha * direction[i];
-                    residual[i] -= alpha * product[i];
-                }
-                ++steps;
-                norm = dot( residual, residual );
-                if( !std::isfinite( norm ) ) throw std::runtime_error( defectKey + " nonfinite correction residual" );
-                if( norm <= limit ) break;
-                applyPre();
-                const double next = dot( residual, pre ), beta = next / rz;
-                for( std::size_t i = 0; i < n; ++i ) direction[i] = pre[i] + beta * direction[i];
-                rz = next;
-            }
-            pressureOperator.project( correction );
-            pressureOperator.multiply( correction, product ); pressureOperator.project( product );
-            double actual = 0.0;
-            for( std::size_t i = 0; i < n; ++i )
-            {
-                const double delta = b[i] - product[i];
-                actual += delta * delta;
-            }
-            if( !std::isfinite( actual ) || actual > limit )
-                throw std::runtime_error( defectKey + " correction true residual failed" );
-            relativeSquared = initialSquared > 0.0 ? actual / initialSquared : 0.0;
-        };
-
         std::vector<double> correctedPressure = p;
         auto current = evaluateDefect( correctedPressure );
         if( !current.analytic || current.unsupported != 0.0 )
@@ -1999,8 +1945,11 @@ struct fluidStateTraceProbe2
             double acceptedStep = 0.0, relativeSquared = 0.0;
             if( pass > 0 && !stalled )
             {
-                std::vector<double> correction;
-                solveCorrection( current.residual, correction, steps, relativeSquared );
+                const auto solvedCorrection = fluidDetail::solveIntervalPressureCorrection(
+                    current.residual, pressureOperator, dt );
+                const auto& correction = solvedCorrection.pressure;
+                steps = solvedCorrection.iterations;
+                relativeSquared = solvedCorrection.relativeSquared;
                 correctionIterations += steps;
                 // Fixed deterministic backtracking. Reject invalid geometry
                 // or any step which fails to decrease both raw L1 and
@@ -3159,6 +3108,27 @@ struct fluidStateTraceProbe2
         if( !linearHistoryRejected )
             throw std::runtime_error( "R4bv invalid frozen linear history accepted" );
         std::puts( "R4bv interval linear solve regressions passed" );
+
+        const std::vector<double> correctionError{ -0.25, 0.25 };
+        const auto exactCorrection = fluidDetail::solveIntervalPressureCorrection(
+            correctionError, exactOperator, 0.5 );
+        if( exactCorrection.pressure != std::vector<double>{ 0.5, -0.5 } ||
+            exactCorrection.iterations != 1 || exactCorrection.relativeSquared != 0.0 )
+            throw std::runtime_error( "R4bw exact correction regression" );
+        const std::vector<double> compatibleCorrectionError{ 1.0, 1.0 };
+        const auto zeroCorrection = fluidDetail::solveIntervalPressureCorrection(
+            compatibleCorrectionError, exactOperator, 0.5 );
+        if( zeroCorrection.pressure != std::vector<double>{ 0.0, 0.0 } ||
+            zeroCorrection.iterations != 0 || zeroCorrection.relativeSquared != 0.0 )
+            throw std::runtime_error( "R4bw projected zero correction regression" );
+        bool correctionBreakdownRejected = false, correctionExtentRejected = false;
+        try { (void)fluidDetail::solveIntervalPressureCorrection( correctionError, zeroOperator, 0.5 ); }
+        catch( const std::runtime_error& ) { correctionBreakdownRejected = true; }
+        try { (void)fluidDetail::solveIntervalPressureCorrection( {}, exactOperator, 0.5 ); }
+        catch( const std::invalid_argument& ) { correctionExtentRejected = true; }
+        if( !correctionBreakdownRejected || !correctionExtentRejected )
+            throw std::runtime_error( "R4bw invalid correction accepted" );
+        std::puts( "R4bw interval defect correction regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
