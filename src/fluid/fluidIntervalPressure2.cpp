@@ -9,6 +9,49 @@
 namespace zonai::fluidDetail
 {
 
+intervalPressureQuadrature buildIntervalPressureQuadrature( int samples, int endpointDepth )
+{
+    if( samples <= 0 || endpointDepth < 0 || endpointDepth > 16 ||
+        ( endpointDepth > 0 && samples < 2 ) ||
+        samples > std::numeric_limits<int>::max() - 2 * endpointDepth )
+        throw std::invalid_argument( "interval pressure: unsupported quadrature schedule" );
+
+    intervalPressureQuadrature result;
+    result.panels.reserve( static_cast<std::size_t>( samples + 2 * endpointDepth ) );
+    if( endpointDepth == 0 )
+    {
+        for( int step = 0; step < samples; ++step )
+            result.panels.push_back( { ( step + 0.5f ) / samples, 1.0, static_cast<double>( step ) / samples } );
+        result.weightSum = samples;
+    }
+    else
+    {
+        // Subdivide only the first and last uniform panels. Keep all
+        // quadrature samples interior, without an endpoint aperture floor.
+        const auto panel = [&]( double lo, double hi )
+        {
+            const double weight = hi - lo;
+            const float alpha = static_cast<float>( 0.5 * ( lo + hi ) );
+            if( !( alpha > 0.0f && alpha < 1.0f && weight > 0.0 ) )
+                throw std::runtime_error( "interval pressure: invalid refined panel" );
+            result.panels.push_back( { alpha, weight, lo } );
+            result.weightSum += weight;
+        };
+        const double width = 1.0 / samples;
+        double tiny = width;
+        for( int i = 0; i < endpointDepth; ++i ) tiny *= 0.5;
+        panel( 0.0, tiny );
+        for( double a = tiny; a < width; a *= 2.0 ) panel( a, 2.0 * a );
+        for( int step = 1; step < samples - 1; ++step )
+            panel( step * width, ( step + 1 ) * width );
+        for( double a = width; a > tiny; a *= 0.5 ) panel( 1.0 - a, 1.0 - 0.5 * a );
+        panel( 1.0 - tiny, 1.0 );
+        if( std::abs( result.weightSum - 1.0 ) > 1.0e-14 )
+            throw std::runtime_error( "interval pressure: refined quadrature weights do not sum to one" );
+    }
+    return result;
+}
+
 intervalPressureGraph buildIntervalPressureGraph( int width, int height,
     double h, double dt, std::span<const double> meanFraction,
     std::span<const float> previousFraction, std::span<const float> endpointFraction,
@@ -254,6 +297,20 @@ intervalPressureRhsResult buildIntervalPressureRhs(
     for( std::size_t i = 0; i < n; ++i )
         compatibilityL1 += std::abs( rhs[i] + scale * rawDivergence[i] );
     return { compatibilityL1 };
+}
+
+void normalizeIntervalPressureQuadrature( double weightSum, std::span<double> meanU,
+    std::span<double> meanV, std::span<double> fraction, std::span<intervalPressureResponse> coefficients )
+{
+    if( !std::isfinite( weightSum ) || weightSum <= 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid quadrature weight sum" );
+    for( double& a : meanU ) a /= weightSum;
+    for( double& a : meanV ) a /= weightSum;
+    for( double& a : fraction ) a /= weightSum;
+    for( auto& c : coefficients )
+    {
+        c.fx /= weightSum; c.fy /= weightSum; c.torque /= weightSum;
+    }
 }
 
 void transposeIntervalPressureBodies( std::span<const intervalPressureResponse> coefficients,
