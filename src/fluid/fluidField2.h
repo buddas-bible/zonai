@@ -873,6 +873,7 @@ private:
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
     [[nodiscard]] vec2 getAdvectionFaceMomentum() const noexcept;
+    void advectSemiLagrangian( float timeStep );
     void advectConservative( float timeStep );
     [[nodiscard]] float tracerCellFraction( int x, int y ) const noexcept;
     void transportTracer( float timeStep );
