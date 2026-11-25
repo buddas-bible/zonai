@@ -3125,30 +3125,36 @@ struct fluidStateTraceProbe2
 
         // The private field entry must commit only the scalar state and
         // its statistics. Rejected transport leaves even those unchanged.
-        fluidField2 trial( 2, 1, 1.0f );
+        fluidField2 trial( 2, 2, 1.0f );
+        const std::vector<double> emptyField( 4, 0.0 );
+        const auto fieldCycle = fluidDetail::repairClosingTransport( emptyField, emptyField,
+            {{ 0, 1, 0.5 }, { 1, 0, 0.5 }} );
+        if( !fieldCycle ) throw std::runtime_error( "R4bi missing field cycle" );
+        trial.cellFluidFraction_.assign( 4, 0.0f );
         trial.tracerEnabled_ = true;
-        trial.tracerMass_ = { 0.0, 0.0 };
+        trial.tracerMass_ = emptyField;
         trial.tracerStats_.beforeMass = 3.0f;
         trial.tracerStats_.afterMass = 4.0f;
         trial.tracerStats_.substeps = 7;
         const auto beforeU = trial.u_, beforeV = trial.v_, beforePressure = trial.pressure_;
-        if( trial.commitIntervalTracer( empty, *cycle, chainMap, chainPanels, 1.0 ) ||
-            trial.tracerMass_ != empty || trial.tracerStats_.beforeMass != 3.0f ||
+        if( trial.commitIntervalTracer( emptyField, *fieldCycle, chainMap, chainPanels, 1.0 ) ||
+            trial.tracerMass_ != emptyField || trial.tracerStats_.beforeMass != 3.0f ||
             trial.tracerStats_.afterMass != 4.0f || trial.tracerStats_.substeps != 7 ||
             trial.u_ != beforeU || trial.v_ != beforeV || trial.pressure_ != beforePressure )
             throw std::runtime_error( "R4bi rejected field interval modified state" );
-        const std::vector<double> simpleStart{ 1.0, 1.0 };
+        const std::vector<double> simpleStart{ 1.0, 0.5, 1.0, 1.0 };
+        trial.cellFluidFraction_ = { 0.5f, 1.0f, 1.0f, 1.0f };
         const auto fieldRepair = fluidDetail::repairClosingTransport( simpleStart,
-            { 0.5, 1.5 }, {{ 0, 1, 0.5 }} );
-        trial.tracerMass_ = { 2.0, 0.0 };
+            { 0.5, 1.0, 1.0, 1.0 }, {{ 0, 1, 0.5 }} );
+        trial.tracerMass_ = { 2.0, 0.0, 0.0, 0.0 };
         trial.tracerEnabled_ = false;
         if( !fieldRepair || trial.commitIntervalTracer( simpleStart, *fieldRepair, {}, {}, 0.0 ) ||
-            trial.tracerMass_ != std::vector<double>{ 2.0, 0.0 } ||
+            trial.tracerMass_ != std::vector<double>{ 2.0, 0.0, 0.0, 0.0 } ||
             trial.tracerStats_.substeps != 7 )
             throw std::runtime_error( "R4bi disabled field interval modified state" );
         trial.tracerEnabled_ = true;
         if( !trial.commitIntervalTracer( simpleStart, *fieldRepair, {}, {}, 0.0 ) ||
-            trial.tracerMass_ != std::vector<double>{ 1.0, 1.0 } ||
+            trial.tracerMass_ != std::vector<double>{ 1.0, 1.0, 0.0, 0.0 } ||
             trial.tracerStats_.beforeMass != 2.0f || trial.tracerStats_.afterMass != 2.0f ||
             trial.tracerStats_.substeps != 1 ||
             trial.u_ != beforeU || trial.v_ != beforeV || trial.pressure_ != beforePressure )
