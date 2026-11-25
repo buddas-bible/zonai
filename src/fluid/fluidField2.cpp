@@ -1040,6 +1040,64 @@ double DisjointShapeRectangleArea( const analyticDisjointShape2& shape,
     }, shape.geometry );
 }
 
+// A convex solid contains the entire rectangle if it strictly contains all
+// four corners. Use a conservative roundoff guard: ambiguous boundary
+// cases remain on the original area integration path.
+bool CertifiesFullCellCoverage( const analyticDisjointShape2& shape,
+    double x0, double y0, double x1, double y1 )
+{
+    if( shape.occluded ) return false;
+    const double coordinateScale = std::max( { 1.0, std::abs( x0 ), std::abs( y0 ),
+        std::abs( x1 ), std::abs( y1 ), std::abs( static_cast<double>( shape.bounds.min.x ) ),
+        std::abs( static_cast<double>( shape.bounds.min.y ) ),
+        std::abs( static_cast<double>( shape.bounds.max.x ) ),
+        std::abs( static_cast<double>( shape.bounds.max.y ) ) } );
+    const double guard = 128.0 * std::numeric_limits<double>::epsilon() *
+        coordinateScale * coordinateScale;
+    const auto inside = [&]( double x, double y )
+    {
+        return std::visit( [&]( const auto& geometry ) -> bool
+        {
+            using T = std::remove_cvref_t<decltype( geometry )>;
+            const auto insideDisk = [&]( const auto& disk )
+            {
+                const double dx = x - disk.center.x, dy = y - disk.center.y;
+                return disk.radius * disk.radius - ( dx * dx + dy * dy ) > guard;
+            };
+            if constexpr( std::is_same_v<T, analyticFluidCircle> )
+                return insideDisk( geometry );
+            else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
+            {
+                for( int i = 0; i < geometry.count; ++i )
+                {
+                    const auto a = geometry.vertices[i];
+                    const auto b = geometry.vertices[( i + 1 ) % geometry.count];
+                    const double ex = static_cast<double>( b.x ) - a.x;
+                    const double ey = static_cast<double>( b.y ) - a.y;
+                    if( !( ex * ( y - a.y ) - ey * ( x - a.x ) > guard ) ) return false;
+                }
+                return true;
+            }
+            else if constexpr( std::is_same_v<T, preciseAnalyticCapsule> )
+            {
+                if( insideDisk( geometry.first ) || insideDisk( geometry.last ) ) return true;
+                const auto a = geometry.first.center, b = geometry.last.center;
+                const double dx = b.x - a.x, dy = b.y - a.y;
+                const double px = x - a.x, py = y - a.y;
+                const double length2 = dx * dx + dy * dy;
+                const double along = px * dx + py * dy;
+                if( !( along > guard && length2 - along > guard ) ) return false;
+                const double cross = dx * py - dy * px;
+                return geometry.first.radius * geometry.first.radius * length2 -
+                    cross * cross > guard * coordinateScale * coordinateScale;
+            }
+            else return false;
+        }, shape.geometry );
+    };
+    return inside( x0, y0 ) && inside( x1, y0 ) &&
+        inside( x0, y1 ) && inside( x1, y1 );
+}
+
 analyticCircleInterval ClipDisjointShapeFace( const analyticDisjointShape2& shape,
     bool vertical, double coordinate, double low, double high )
 {
@@ -1695,8 +1753,21 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                             std::get<analyticFluidCircle>( disjointShapes[0].geometry ),
                             std::get<analyticFluidCircle>( disjointShapes[1].geometry ),
                             left, bottom, left + h, bottom + h );
-                    cellFluidFraction_[cell] = static_cast<float>(
-                        std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
+                    double fluidFraction = std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 );
+                    // Only correct a near-full subtraction residual when one
+                    // convex obstacle independently certifies full coverage.
+                    // No global minimum fluid fraction or aperture floor.
+                    if( certifiedFullCellCoverageEnabled_ && fluidFraction > 0.0 &&
+                        fluidFraction <= 64.0 * std::numeric_limits<double>::epsilon() )
+                    {
+                        for( const auto& shape : disjointShapes )
+                            if( CertifiesFullCellCoverage( shape, left, bottom, left + h, bottom + h ) )
+                            {
+                                fluidFraction = 0.0;
+                                break;
+                            }
+                    }
+                    cellFluidFraction_[cell] = static_cast<float>( fluidFraction );
                 }
             // For three or more disjoint shapes, the blocked intervals are
             // independent. Accumulate them shape-major in their AABB face
