@@ -5,6 +5,11 @@
 #include <utility>
 #include <vector>
 
+namespace zonai
+{
+struct fluidShapeObstacle2;
+}
+
 namespace zonai::fluidDetail
 {
 
@@ -23,6 +28,22 @@ struct intervalPressureQuadrature
 // Uniform midpoint mode retains unit weights and binary32 midpoint
 // arithmetic. Refined mode uses dyadic subdivisions of the end panels.
 [[nodiscard]] intervalPressureQuadrature buildIntervalPressureQuadrature( int samples, int endpointDepth );
+
+struct intervalPressurePoseMotion
+{
+    float angle, omega;
+};
+
+// Prepare the shortest angular displacement using the frozen interval dt.
+// Start and finish must contain the same owners in the same order.
+[[nodiscard]] std::vector<intervalPressurePoseMotion> prepareIntervalPressurePoseMotion(
+    std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish, float dt );
+
+// Only pose and COM are updated. poses must be a nonaliasing scratch copy
+// of finish; endpoint geometry, velocities and inverse mass remain frozen.
+void sampleIntervalPressurePoses( std::span<const fluidShapeObstacle2> start,
+    std::span<const fluidShapeObstacle2> finish, std::span<const intervalPressurePoseMotion> motion,
+    float dt, float alpha, std::span<fluidShapeObstacle2> poses );
 
 struct intervalPressureGeometrySample
 {
