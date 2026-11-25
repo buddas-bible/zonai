@@ -3191,6 +3191,56 @@ struct fluidStateTraceProbe2
         if( repair.changedFaces == 0 && history.original == history.repaired &&
             nextOriginal != nextRepaired )
             throw std::runtime_error( "R4ar identical input transport diverged" );
+        // R4as: distinguish retained mass released by reopening geometry
+        // from a concentration peak caused by a small active cell.
+        const std::string topologyKey = "forwardTracerReopening.interval" + std::to_string( index );
+        int reopeningCells = 0;
+        for( std::size_t i = 0; i < n; ++i )
+            reopeningCells += startFraction[i] == 0.0f && field.cellFluidFraction_[i] > 0.0f;
+        appendScalar( trace, topologyKey + ".reopeningCells", reopeningCells );
+        const auto auditTopology = [&]( const std::vector<double>& previous,
+            const std::vector<double>& next, const char* mode )
+        {
+            int peakCell = -1;
+            double peak = 0.0, reopeningMass = 0.0, reopeningPeak = 0.0, retainedPeak = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double fraction = field.cellFluidFraction_[i];
+                if( startFraction[i] == 0.0f && next[i] < previous[i] )
+                    throw std::runtime_error( topologyKey + " closed-start tracer mass lost" );
+                if( fraction <= 0.0 ) continue;
+                const double volume = area * fraction;
+                const double concentration = next[i] / volume;
+                if( !std::isfinite( concentration ) || concentration < 0.0 )
+                    throw std::runtime_error( topologyKey + " invalid concentration" );
+                if( peakCell < 0 || concentration > peak )
+                {
+                    peakCell = static_cast<int>( i );
+                    peak = concentration;
+                }
+                if( startFraction[i] == 0.0f )
+                {
+                    reopeningMass += previous[i];
+                    reopeningPeak = std::max( reopeningPeak, concentration );
+                    retainedPeak = std::max( retainedPeak, previous[i] / volume );
+                }
+            }
+            if( peakCell < 0 || !std::isfinite( reopeningMass ) || !std::isfinite( retainedPeak ) )
+                throw std::runtime_error( topologyKey + " invalid reopening audit" );
+            const std::string key = topologyKey + mode;
+            appendScalar( trace, key + ".peakCell", peakCell );
+            appendScalar( trace, key + ".peakStartFraction", startFraction[peakCell] );
+            appendScalar( trace, key + ".peakEndFraction", field.cellFluidFraction_[peakCell] );
+            appendScalar( trace, key + ".reopeningMassBefore", reopeningMass );
+            appendScalar( trace, key + ".reopeningPeakConcentration", reopeningPeak );
+            appendScalar( trace, key + ".retainedPeakConcentration", retainedPeak );
+            std::printf( "R4as interval%d %s reopening %d retainedMass %.17g reopeningPeak %.17g "
+                "retainedPeak %.17g peakCell %d start/endFraction %.9g/%.9g peak %.17g\n",
+                index, mode, reopeningCells, reopeningMass, reopeningPeak, retainedPeak,
+                peakCell, startFraction[peakCell], field.cellFluidFraction_[peakCell], peak );
+        };
+        auditTopology( history.original, nextOriginal, ".original" );
+        auditTopology( history.repaired, nextRepaired, ".repaired" );
         history.original = std::move( nextOriginal );
         history.repaired = std::move( nextRepaired );
         ++history.intervals;
