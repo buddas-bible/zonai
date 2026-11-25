@@ -2,10 +2,99 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <string>
 #include <stdexcept>
 
 namespace zonai::fluidDetail
 {
+
+intervalPressureGraph buildIntervalPressureGraph( int width, int height,
+    double h, double dt, std::span<const double> meanFraction,
+    std::span<const float> previousFraction, std::span<const float> endpointFraction,
+    const intervalPressureFaceInput& u, const intervalPressureFaceInput& v )
+{
+    const auto maxIndex = static_cast<std::size_t>( std::numeric_limits<int>::max() );
+    if( width <= 0 || height <= 0 || width == std::numeric_limits<int>::max() ||
+        height == std::numeric_limits<int>::max() || !std::isfinite( h ) || h <= 0.0 ||
+        !std::isfinite( dt ) || dt <= 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid graph dimensions or scales" );
+    const auto w = static_cast<std::size_t>( width ), rows = static_cast<std::size_t>( height );
+    if( w + 1 > maxIndex / rows || w > maxIndex / ( rows + 1 ) )
+        throw std::invalid_argument( "interval pressure: graph index overflow" );
+    const std::size_t n = w * rows, nu = ( w + 1 ) * rows, nv = w * ( rows + 1 );
+    if( meanFraction.size() != n || previousFraction.size() != n || endpointFraction.size() != n ||
+        u.meanOpen.size() != nu || u.velocity.size() != nu || u.endpointOpen.size() != nu ||
+        v.meanOpen.size() != nv || v.velocity.size() != nv || v.endpointOpen.size() != nv )
+        throw std::invalid_argument( "interval pressure: invalid graph extents" );
+
+    intervalPressureGraph graph;
+    auto& [edges, diagonal, rawDivergence, parent, count, active, regions, closedEndFaces, sourceSum] = graph;
+    diagonal.resize( n ); rawDivergence.resize( n );
+    parent.assign( n, -1 ); count.resize( n );
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( !std::isfinite( meanFraction[i] ) || !std::isfinite( previousFraction[i] ) ||
+            !std::isfinite( endpointFraction[i] ) || meanFraction[i] < 0.0 ||
+            previousFraction[i] < 0.0f || endpointFraction[i] < 0.0f )
+            throw std::invalid_argument( "interval pressure: invalid cell fraction" );
+        const double change = static_cast<double>( endpointFraction[i] ) - previousFraction[i];
+        if( meanFraction[i] <= 0.0 )
+        {
+            if( change != 0.0 )
+                throw std::runtime_error( "interval pressure: changed volume missed by quadrature at cell " +
+                    std::to_string( i ) );
+            continue;
+        }
+        parent[i] = static_cast<int>( i );
+        ++active;
+        sourceSum += change;
+        rawDivergence[i] = change / dt;
+    }
+    const auto root = [&]( int i )
+    {
+        while( parent[i] != i ) i = parent[i];
+        return i;
+    };
+    const auto addEdge = [&]( bool isU, int x, int y )
+    {
+        const auto& face = isU ? u : v;
+        const int index = isU ? y * ( width + 1 ) + x : y * width + x;
+        const double a = face.meanOpen[index];
+        if( !std::isfinite( a ) || a < 0.0 )
+            throw std::invalid_argument( "interval pressure: invalid mean face aperture" );
+        if( a <= 0.0 ) return;
+        const int right = y * width + x;
+        const int left = right - ( isU ? 1 : width );
+        if( parent[left] < 0 || parent[right] < 0 )
+            throw std::runtime_error( "interval pressure: open face lacks interval-active cell" );
+        const int l = root( left ), r = root( right );
+        if( l != r ) parent[std::max( l, r )] = std::min( l, r );
+        const double velocity = face.velocity[index];
+        const float endOpen = endpointFraction[left] == 0.0f || endpointFraction[right] == 0.0f ?
+            0.0f : face.endpointOpen[index];
+        if( !std::isfinite( velocity ) || !std::isfinite( endOpen ) || endOpen < 0.0f )
+            throw std::invalid_argument( "interval pressure: invalid active face state" );
+        closedEndFaces += endOpen == 0.0f;
+        edges.push_back( { left, right, a, velocity, isU, index } );
+        diagonal[left] += a; diagonal[right] += a;
+        const double flux = a * velocity / h;
+        rawDivergence[left] += flux; rawDivergence[right] -= flux;
+    };
+    for( int y = 0; y < height; ++y )
+        for( int x = 1; x < width; ++x ) addEdge( true, x, y );
+    for( int y = 1; y < height; ++y )
+        for( int x = 0; x < width; ++x ) addEdge( false, x, y );
+    for( std::size_t i = 0; i < n; ++i )
+        if( parent[i] >= 0 )
+        {
+            parent[i] = root( static_cast<int>( i ) );
+            ++count[parent[i]];
+        }
+    for( int componentCount : count ) regions += componentCount > 0;
+    if( active == 0 || edges.empty() ) throw std::runtime_error( "interval pressure: empty interval graph" );
+    return graph;
+}
 
 void projectIntervalPressureGauge( std::span<double> values, std::span<const int> parent,
     std::span<const int> count, std::span<double> sums )
