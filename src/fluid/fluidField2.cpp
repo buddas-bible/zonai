@@ -2142,6 +2142,27 @@ bool fluidField2::rebuildIntervalPressureGeometry( std::span<const fluidShapeObs
     return cutCellTransition_.usedDisjointAnalyticGeometry;
 }
 
+void fluidField2::setIntervalPressureHistory( float timeStep, std::span<const float> startFraction,
+    std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish )
+{
+    if( !std::isfinite( timeStep ) || timeStep <= 0.0f ||
+        startFraction.size() != cellFluidFraction_.size() || start.size() != finish.size() )
+        throw std::invalid_argument( "interval pressure: invalid frozen history" );
+    for( const float fraction : startFraction )
+        if( !std::isfinite( fraction ) || fraction < 0.0f || fraction > 1.0f )
+            throw std::invalid_argument( "interval pressure: invalid start fraction" );
+
+    // Prepare all copies before replacing any history, including aliased inputs.
+    std::vector<float> fractions( startFraction.begin(), startFraction.end() );
+    std::vector<fluidShapeObstacle2> startPoses( start.begin(), start.end() );
+    std::vector<fluidShapeObstacle2> finishPoses( finish.begin(), finish.end() );
+    previousCellFluidFraction_.swap( fractions );
+    previousObstacles_.swap( startPoses );
+    frozenPressureObstacles_.swap( finishPoses );
+    frozenPressureTimeStep_ = timeStep;
+    volumeSourceValid_ = true;
+}
+
 void fluidField2::integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
     std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
     const fluidDetail::intervalPressureQuadrature& quadrature,
