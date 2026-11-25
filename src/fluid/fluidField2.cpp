@@ -2448,6 +2448,56 @@ fluidDetail::intervalPressureDefectResult fluidField2::correctIntervalPressureDe
     return result;
 }
 
+fluidDetail::intervalPressureCandidate fluidField2::buildIntervalPressureCandidate(
+    const fluidDetail::intervalPressureGeometryIntegral& integral,
+    const fluidDetail::intervalPressureLinearState& linear,
+    const fluidDetail::intervalPressureDefectResult& defect, bool captureIntervalVelocity ) const
+{
+    const std::size_t n = cellFluidFraction_.size(), owners = frozenPressureObstacles_.size();
+    const double h = cellSize_, dt = frozenPressureTimeStep_;
+    if( !volumeSourceValid_ || !linear.solution || linear.rhsResult.failedComponent >= 0 ||
+        !defect.final.analytic || defect.final.unsupported != 0.0 || defect.passes.empty() ||
+        defect.pressure.size() != n || linear.force.size() != owners ||
+        defect.final.residual.size() != n )
+        throw std::invalid_argument( "interval pressure: invalid candidate input" );
+
+    auto reconstructed = fluidDetail::reconstructIntervalPressure( width_, height_, h, dt,
+        linear.graph, defect.pressure, previousCellFluidFraction_, cellFluidFraction_,
+        { integral.meanU, u_, uOpenFraction_ }, { integral.meanV, v_, vOpenFraction_ },
+        captureIntervalVelocity );
+    fluidDetail::intervalPressureCandidate result;
+    result.u = std::move( reconstructed.u );
+    result.v = std::move( reconstructed.v );
+    result.fluxVolume = std::move( reconstructed.fluxVolume );
+    result.uncoveredEndpointFaces = reconstructed.uncoveredEndpointFaces;
+    const auto checkedFloat = []( double value )
+    {
+        if( !std::isfinite( value ) || std::abs( value ) > std::numeric_limits<float>::max() )
+            throw std::runtime_error( "interval pressure: candidate float overflow" );
+        return static_cast<float>( value );
+    };
+    result.pressure.resize( n );
+    for( std::size_t i = 0; i < n; ++i )
+        result.pressure[i] = checkedFloat( defect.pressure[i] );
+    result.feedback.resize( owners );
+    for( std::size_t i = 0; i < owners; ++i )
+    {
+        result.feedback[i].force = { checkedFloat( linear.force[i].fx ), checkedFloat( linear.force[i].fy ) };
+        result.feedback[i].torque = checkedFloat( linear.force[i].torque );
+    }
+    for( double volume : result.fluxVolume )
+        if( !std::isfinite( volume ) )
+            throw std::runtime_error( "interval pressure: nonfinite candidate flux volume" );
+    result.component = linear.graph.parent;
+    if( captureIntervalVelocity )
+    {
+        result.meanU = integral.meanU; result.meanV = integral.meanV;
+        result.intervalU = std::move( reconstructed.intervalU );
+        result.intervalV = std::move( reconstructed.intervalV );
+    }
+    return result;
+}
+
 void fluidField2::remapExposedFaces()
 {
     // 새로 열린 fluid-fluid face가 이전 rigid boundary의 속도를 그대로 상속하지 않도록
