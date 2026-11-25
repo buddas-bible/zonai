@@ -3120,6 +3120,105 @@ struct fluidStateTraceProbe2
                         negativeSum, negatives, gap, trial.initialIterations, trial.trueResidualSquared );
                 };
                 report( "warmResidual10", candidate );
+                // R4an: a matched, uncommitted conservative transport probe.
+                // Reduce one shared outgoing face transfer rather than clamp
+                // the negative cell ledger. Pressure and traction stay fixed.
+                if( predictedFraction[target] != 0.0f || startFraction[target] <= 0.0f )
+                    throw std::runtime_error( splitKey + " R4an expected a closing cell" );
+                const double h = forward.cellSize_;
+                auto trialU = candidate.intervalU, trialV = candidate.intervalV;
+                struct transferFace
+                {
+                    bool isU = false;
+                    int face = -1;
+                    int neighbor = -1;
+                    double outward = 0.0;
+                    double factor = 0.0;
+                };
+                transferFace chosen;
+                const int x = static_cast<int>( target ) % forward.width_;
+                const int y = static_cast<int>( target ) / forward.width_;
+                const auto consider = [&]( bool isU, int fx, int fy, int neighbor, double sign )
+                {
+                    if( neighbor < 0 || candidate.component[neighbor] != candidate.component[target] )
+                        return;
+                    const int face = isU ? forward.uIndex( fx, fy ) : forward.vIndex( fx, fy );
+                    const double aperture = ( isU ? candidate.meanU : candidate.meanV )[face];
+                    const double factor = static_cast<double>( dt ) * h * aperture;
+                    const double outward = sign * factor * ( isU ? trialU : trialV )[face];
+                    if( predictedFraction[neighbor] > 0.0f && outward > chosen.outward )
+                        chosen = { isU, face, neighbor, outward, factor };
+                };
+                if( x > 0 ) consider( true, x, y, forward.cellIndex( x - 1, y ), -1.0 );
+                if( x + 1 < forward.width_ ) consider( true, x + 1, y, forward.cellIndex( x + 1, y ), 1.0 );
+                if( y > 0 ) consider( false, x, y, forward.cellIndex( x, y - 1 ), -1.0 );
+                if( y + 1 < forward.height_ ) consider( false, x, y + 1, forward.cellIndex( x, y + 1 ), 1.0 );
+                const double deficit = -*minimum;
+                // Account for subtraction roundoff, not a physical volume floor.
+                const double guard = 16.0 * std::numeric_limits<double>::epsilon() *
+                    std::max( area * startFraction[target], chosen.outward );
+                if( chosen.face < 0 || !( chosen.outward > deficit + guard ) ||
+                    chosen.factor <= 0.0 || candidate.fluxVolume[chosen.neighbor] <= deficit + guard )
+                    throw std::runtime_error( splitKey + " R4an no safe shared outgoing transfer" );
+                auto& changedVelocity = ( chosen.isU ? trialU : trialV )[chosen.face];
+                const double oldVelocity = changedVelocity;
+                const double oldTransfer = chosen.factor * oldVelocity;
+                changedVelocity *= 1.0 - ( deficit + guard ) / chosen.outward;
+                const double transferReduction = std::abs( oldTransfer ) -
+                    std::abs( chosen.factor * changedVelocity );
+                const auto rebuildLedger = [&]( const std::vector<double>& u, const std::vector<double>& v )
+                {
+                    std::vector<double> ledger( startFraction.size() );
+                    for( std::size_t i = 0; i < ledger.size(); ++i )
+                        ledger[i] = area * startFraction[i];
+                    const auto transfer = [&]( bool isU, int fx, int fy )
+                    {
+                        const int face = isU ? forward.uIndex( fx, fy ) : forward.vIndex( fx, fy );
+                        const double aperture = ( isU ? candidate.meanU : candidate.meanV )[face];
+                        if( aperture <= 0.0 ) return;
+                        const int a = forward.cellIndex( fx - ( isU ? 1 : 0 ), fy - ( isU ? 0 : 1 ) );
+                        const int b = forward.cellIndex( fx, fy );
+                        const double amount = static_cast<double>( dt ) * h * aperture * ( isU ? u : v )[face];
+                        ledger[a] -= amount; ledger[b] += amount;
+                    };
+                    for( int fy = 0; fy < forward.height_; ++fy )
+                        for( int fx = 1; fx < forward.width_; ++fx ) transfer( true, fx, fy );
+                    for( int fy = 1; fy < forward.height_; ++fy )
+                        for( int fx = 0; fx < forward.width_; ++fx ) transfer( false, fx, fy );
+                    return ledger;
+                };
+                if( rebuildLedger( candidate.intervalU, candidate.intervalV ) != candidate.fluxVolume )
+                    throw std::runtime_error( splitKey + " R4an baseline ledger differs" );
+                const auto corrected = rebuildLedger( trialU, trialV );
+                double sumDelta = 0.0, gapBefore = 0.0, gapAfter = 0.0, maxDelta = 0.0;
+                int changedCells = 0;
+                for( std::size_t i = 0; i < corrected.size(); ++i )
+                {
+                    const double delta = corrected[i] - candidate.fluxVolume[i];
+                    sumDelta += delta;
+                    maxDelta = std::max( maxDelta, std::abs( delta ) );
+                    changedCells += delta != 0.0;
+                    gapBefore += std::abs( area * predictedFraction[i] - candidate.fluxVolume[i] );
+                    gapAfter += std::abs( area * predictedFraction[i] - corrected[i] );
+                    if( !std::isfinite( corrected[i] ) || corrected[i] < 0.0 ||
+                        ( i != target && i != static_cast<std::size_t>( chosen.neighbor ) && delta != 0.0 ) )
+                        throw std::runtime_error( splitKey + " R4an invalid corrected shared-face ledger" );
+                }
+                const double conservationError = std::abs( sumDelta );
+                const double conservationBound = 32.0 * std::numeric_limits<double>::epsilon() *
+                    ( area * startFraction[target] + std::abs( candidate.fluxVolume[chosen.neighbor] ) +
+                        std::abs( oldTransfer ) );
+                if( !( transferReduction > 0.0 ) || corrected[target] > 2.0 * guard ||
+                    conservationError > conservationBound || changedCells != 2 )
+                    throw std::runtime_error( splitKey + " R4an transfer conservation audit failed" );
+                std::printf( "R4an interval64 target %zu neighbor %d face %c%d deficit %.17g reduction %.17g "
+                    "targetAfter %.17g neighborBefore %.17g neighborAfter %.17g conservationError %.17g "
+                    "gapBefore %.17g gapAfter %.17g maxDelta %.17g velocityDelta %.17g changedCells %d PCG %d\n",
+                    target, chosen.neighbor, chosen.isU ? 'U' : 'V', chosen.face, deficit, transferReduction,
+                    corrected[target], candidate.fluxVolume[chosen.neighbor], corrected[chosen.neighbor],
+                    conservationError, gapBefore, gapAfter, maxDelta, changedVelocity - oldVelocity,
+                    changedCells, candidate.initialIterations );
+
                 for( bool warm : { false, true } )
                 {
                     const std::string trialKey = splitKey + ( warm ? ".R4alWarmStrict" : ".R4alColdStrict" );
