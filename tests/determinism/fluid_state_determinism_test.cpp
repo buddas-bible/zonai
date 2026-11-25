@@ -4216,26 +4216,15 @@ struct fluidStateTraceProbe2
         if( staggered && ( !committed || !input.preciseDisjointCapsuleEnabled_ ) )
             throw std::runtime_error( "R4ad invalid staggered fixture" );
         const auto predicted = run( staggered ? laggedLoad : std::vector<fluidObstacleForce2>( start.size() ) );
-        fluidField2 forward = input;
-        forward.setPrePressureSnapshotObserver( {} );
-        setStageObserver( forward, {} );
+        fluidField2 forward = input.prepareIntervalPressureEndpoint( dt, start, predicted );
         forward.tracerEnabled_ = false;
         const auto rebuild = [&]( const std::vector<fluidShapeObstacle2>& poses )
         {
-            forward.updateObstacles( poses );
-            forward.updateCutCellGeometry( poses );
-            if( !forward.cutCellTransition_.usedDisjointAnalyticGeometry )
+            if( !forward.rebuildIntervalPressureGeometry( poses ) )
                 throw std::runtime_error( key + " forward geometry not analytic" );
         };
-        rebuild( start );
-        const auto startFraction = forward.cellFluidFraction_;
-        if( startFraction != input.cellFluidFraction_ )
-            throw std::runtime_error( key + " start geometry differs from frozen input" );
-        rebuild( predicted );
+        const auto startFraction = forward.previousCellFluidFraction_;
         const auto predictedFraction = forward.cellFluidFraction_;
-        forward.setIntervalPressureHistory( dt, startFraction, start, predicted );
-        forward.u_ = input.u_;
-        forward.v_ = input.v_;
         continuationPressure candidate;
         std::string scratch;
         if( staggered )
@@ -4263,6 +4252,14 @@ struct fluidStateTraceProbe2
                 // copies at the first interval and the historical repair case.
                 if( auditIntegrated )
                 {
+                    // Invalid endpoint preparation must leave the source and
+                    // its already prepared reference untouched.
+                    bool invalidEndpointRejected = false;
+                    try { (void)input.prepareIntervalPressureEndpoint( 0.0f, start, predicted ); }
+                    catch( const std::invalid_argument& ) { invalidEndpointRejected = true; }
+                    if( !invalidEndpointRejected || input.cellFluidFraction_ != startFraction ||
+                        input.u_ != forward.u_ || input.v_ != forward.v_ )
+                        throw std::runtime_error( "R4cj invalid endpoint preparation regression" );
                     fluidField2 integrated = forward, staged = forward;
                     integrated.tracerEnabled_ = staged.tracerEnabled_ = true;
                     integrated.tracerMass_.resize( startFraction.size() );
