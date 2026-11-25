@@ -117,6 +117,94 @@ void multiplyIntervalPressureGraph( std::span<const intervalPressureEdge> edges,
     }
 }
 
+intervalPressureReconstruction reconstructIntervalPressure(
+    int width, int height, double h, double dt, const intervalPressureGraph& graph,
+    std::span<const double> pressure, std::span<const float> previousFraction,
+    std::span<const float> endpointFraction, const intervalPressureFaceInput& u,
+    const intervalPressureFaceInput& v, bool captureIntervalVelocity )
+{
+    const auto maxIndex = static_cast<std::size_t>( std::numeric_limits<int>::max() );
+    if( width <= 0 || height <= 0 || width == std::numeric_limits<int>::max() ||
+        height == std::numeric_limits<int>::max() || !std::isfinite( h ) || h <= 0.0 ||
+        !std::isfinite( dt ) || dt <= 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid reconstruction dimensions or scales" );
+    const auto w = static_cast<std::size_t>( width ), rows = static_cast<std::size_t>( height );
+    if( w + 1 > maxIndex / rows || w > maxIndex / ( rows + 1 ) )
+        throw std::invalid_argument( "interval pressure: reconstruction index overflow" );
+    const std::size_t n = w * rows, nu = ( w + 1 ) * rows, nv = w * ( rows + 1 );
+    if( pressure.size() != n || previousFraction.size() != n || endpointFraction.size() != n ||
+        graph.parent.size() != n ||
+        u.meanOpen.size() != nu || u.velocity.size() != nu || u.endpointOpen.size() != nu ||
+        v.meanOpen.size() != nv || v.velocity.size() != nv || v.endpointOpen.size() != nv )
+        throw std::invalid_argument( "interval pressure: invalid reconstruction extents" );
+
+    intervalPressureReconstruction result;
+    result.u.assign( u.velocity.begin(), u.velocity.end() );
+    result.v.assign( v.velocity.begin(), v.velocity.end() );
+    result.fluxVolume.resize( n );
+    if( captureIntervalVelocity )
+    {
+        result.intervalU.resize( nu ); result.intervalV.resize( nv );
+    }
+    const double area = h * h;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( !std::isfinite( pressure[i] ) || !std::isfinite( previousFraction[i] ) ||
+            !std::isfinite( endpointFraction[i] ) || previousFraction[i] < 0.0f || endpointFraction[i] < 0.0f )
+            throw std::invalid_argument( "interval pressure: invalid reconstruction cell" );
+        result.fluxVolume[i] = area * previousFraction[i];
+    }
+    const auto endpointOpen = [&]( const intervalPressureFaceInput& face, int index, int left, int right )
+    {
+        return endpointFraction[left] == 0.0f || endpointFraction[right] == 0.0f ?
+            0.0f : face.endpointOpen[index];
+    };
+    for( const auto& e : graph.edges )
+    {
+        const auto& face = e.isU ? u : v;
+        const int stride = e.isU ? width + 1 : width;
+        if( e.index < 0 || static_cast<std::size_t>( e.index ) >= face.meanOpen.size() )
+            throw std::invalid_argument( "interval pressure: invalid reconstruction face index" );
+        const int x = e.index % stride, y = e.index / stride;
+        if( e.isU ? ( x <= 0 || x >= width || y >= height ) :
+            ( y <= 0 || y >= height || x >= width ) )
+            throw std::invalid_argument( "interval pressure: noninterior reconstruction face" );
+        const int right = y * width + x, left = right - ( e.isU ? 1 : width );
+        if( e.first != left || e.second != right || !std::isfinite( e.a ) || e.a <= 0.0 ||
+            e.a != face.meanOpen[e.index] )
+            throw std::invalid_argument( "interval pressure: inconsistent reconstruction edge" );
+        const double velocity = intervalFaceVelocity( e, pressure, h, dt );
+        const double transfer = intervalFaceTransfer( e, velocity, h, dt );
+        if( !std::isfinite( velocity ) || !std::isfinite( transfer ) )
+            throw std::runtime_error( "interval pressure: nonfinite reconstructed transfer" );
+        if( endpointOpen( face, e.index, left, right ) > 0.0f )
+        {
+            if( std::abs( velocity ) > std::numeric_limits<float>::max() )
+                throw std::runtime_error( "interval pressure: endpoint velocity overflow" );
+            ( e.isU ? result.u : result.v )[e.index] = static_cast<float>( velocity );
+        }
+        result.fluxVolume[left] -= transfer;
+        result.fluxVolume[right] += transfer;
+        if( captureIntervalVelocity )
+            ( e.isU ? result.intervalU : result.intervalV )[e.index] = velocity;
+    }
+    for( int y = 0; y < height; ++y )
+        for( int x = 1; x < width; ++x )
+        {
+            const int index = y * ( width + 1 ) + x, right = y * width + x;
+            result.uncoveredEndpointFaces += endpointOpen( u, index, right - 1, right ) > 0.0f &&
+                u.meanOpen[index] <= 0.0;
+        }
+    for( int y = 1; y < height; ++y )
+        for( int x = 0; x < width; ++x )
+        {
+            const int index = y * width + x;
+            result.uncoveredEndpointFaces += endpointOpen( v, index, index - width, index ) > 0.0f &&
+                v.meanOpen[index] <= 0.0;
+        }
+    return result;
+}
+
 intervalPressureRhsResult buildIntervalPressureRhs(
     const intervalPressureGraph& graph, std::span<const float> endpointFraction,
     double scale, bool volumeWeightedCompatibility, std::span<double> rhs, std::span<double> sums )
