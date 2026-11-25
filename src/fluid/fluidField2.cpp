@@ -1,6 +1,9 @@
 #include "fluid/fluidField2.h"
+#include "fluid/fluidTransport2.h"
+#include "fluid/fluidIntervalPressure2.h"
 
 #include "collision/distance2.h"
+#include "math/deterministicMath.h"
 
 #include <algorithm>
 #include <array>
@@ -144,7 +147,7 @@ struct analyticCircleInterval
 };
 
 // 월드 축에 평행한 MAC face와 원의 교차 구간 [min,max]를 정확히 잘라냄.
-analyticCircleInterval ClipCircleFace( const analyticFluidCircle& circle,
+analyticCircleInterval ClipCircleFace( const auto& circle,
     bool vertical, double coordinate, double low, double high )
 {
     const double normal = vertical ? circle.center.x : circle.center.y;
@@ -253,15 +256,15 @@ bool TryGetAnalyticPolygon( std::span<const fluidShapeObstacle2> obstacles, anal
 
 // 공유 MAC face의 line segment를 polygon의 CCW half-planes에 clip.
 // 결과 길이/중심점은 면적 개방율, 강체 표면 속도, Schur 힘과 swept flux가 공유한다.
-analyticCircleInterval ClipPolygonFace( const analyticFluidPolygon& polygon,
+analyticCircleInterval ClipPolygonFace( const auto& polygon,
     bool vertical, double coordinate, double low, double high )
 {
     double enter = low;
     double exit = high;
     for( int i = 0; i < polygon.count; ++i )
     {
-        const vec2 a = polygon.vertices[i];
-        const vec2 b = polygon.vertices[( i + 1 ) % polygon.count];
+        const auto a = polygon.vertices[i];
+        const auto b = polygon.vertices[( i + 1 ) % polygon.count];
         const double ex = static_cast<double>( b.x ) - a.x;
         const double ey = static_cast<double>( b.y ) - a.y;
         // cross(edge, P(t)-a) >= 0, t is tangent position.
@@ -290,7 +293,7 @@ struct analyticPoint2
 
 // Sutherland-Hodgman 4 half-plane rectangle clipping. Convex input has
 // <=MAX_POLYGON_VERTICES+4 clipped vertices; no per-cell heap allocations.
-double ConvexPolygonRectangleArea( const analyticFluidPolygon& polygon,
+double ConvexPolygonRectangleArea( const auto& polygon,
     double x0, double y0, double x1, double y1 )
 {
     constexpr std::size_t capacity = MAX_POLYGON_VERTICES + 8;
@@ -377,10 +380,46 @@ bool TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2> obstacles, anal
     return true;
 }
 
-analyticCircleInterval ClipCapsuleCapFace( const analyticFluidCapsule& capsule,
+// R4ac: keep derived capsule geometry in double precision through the
+// existing clipping and area integration. World poses remain binary32.
+struct preciseAnalyticCapsule
+{
+    struct circle { analyticPoint2 center{}; double radius = 0.0; };
+    struct polygon { std::array<analyticPoint2, 4> vertices{}; int count = 4; };
+    circle first{}, last{};
+    polygon core{};
+    analyticPoint2 axis{};
+};
+
+bool TryGetPreciseAnalyticCapsule( const fluidShapeObstacle2& obstacle, preciseAnalyticCapsule& result )
+{
+    const auto* shape = std::get_if<capsule2>( &obstacle.geometry );
+    if( !shape || !IsValidFluidObstacle( obstacle ) || !std::isfinite( shape->radius ) ||
+        shape->radius <= 0.0f || !IsFinite( shape->center1 ) || !IsFinite( shape->center2 ) ) return false;
+    const double c = obstacle.transform.rotation.c, s = obstacle.transform.rotation.s;
+    const auto transform = [&]( vec2 p ) -> analyticPoint2
+    {
+        return { static_cast<double>( obstacle.transform.position.x ) + ( c * p.x - s * p.y ),
+            static_cast<double>( obstacle.transform.position.y ) + ( s * p.x + c * p.y ) };
+    };
+    const auto a = transform( shape->center1 ), b = transform( shape->center2 );
+    const double dx = b.x - a.x, dy = b.y - a.y;
+    const double length = std::sqrt( dx * dx + dy * dy );
+    if( !std::isfinite( length ) || length <= 1.0e-5 ) return false;
+    const double r = shape->radius;
+    result = {};
+    result.first = { a, r }; result.last = { b, r };
+    result.axis = { dx / length, dy / length };
+    const double rx = -r * result.axis.y, ry = r * result.axis.x;
+    result.core.vertices = {{ { a.x - rx, a.y - ry }, { b.x - rx, b.y - ry },
+        { b.x + rx, b.y + ry }, { a.x + rx, a.y + ry } }};
+    return true;
+}
+
+analyticCircleInterval ClipCapsuleCapFace( const auto& capsule,
     bool firstCap, bool vertical, double coordinate, double low, double high )
 {
-    const analyticFluidCircle& circle = firstCap ? capsule.first : capsule.last;
+    const auto& circle = firstCap ? capsule.first : capsule.last;
     const auto whole = ClipCircleFace( circle, vertical, coordinate, low, high );
     if( whole.length <= 0.0 ) return {};
     double enter = whole.midpoint - 0.5 * whole.length;
@@ -407,7 +446,7 @@ analyticCircleInterval ClipCapsuleCapFace( const analyticFluidCapsule& capsule,
         : analyticCircleInterval{};
 }
 
-analyticCircleInterval ClipCapsuleFace( const analyticFluidCapsule& capsule,
+analyticCircleInterval ClipCapsuleFace( const auto& capsule,
     bool vertical, double coordinate, double low, double high )
 {
     // 대부분의 MAC face는 Capsule AABB 외부다. 정확한 클리핑 이전에 제외.
@@ -439,7 +478,7 @@ analyticCircleInterval ClipCapsuleFace( const analyticFluidCapsule& capsule,
 // CCW polygon과 원판의 정확한 교차 면적: 각 선분을 원 교차점에서
 // 분할하고 내부는 signed triangle, 외부는 signed circular sector로 적분.
 // 참조: KACTL CirclePolygonIntersection (CC0).
-double CircleClippedPolygonArea( analyticFluidCircle circle,
+double CircleClippedPolygonArea( auto circle,
     const std::array<analyticPoint2, 8>& vertices, int count )
 {
     if( count < 3 ) return 0.0;
@@ -488,14 +527,14 @@ double CircleClippedPolygonArea( analyticFluidCircle circle,
 }
 
 // Cell을 Capsule 축의 양쪽 끝 반평면으로 잘라 독립적인 반원 영역을 얻는다.
-double CapsuleCapRectangleArea( const analyticFluidCapsule& capsule, bool firstCap,
+double CapsuleCapRectangleArea( const auto& capsule, bool firstCap,
     double x0, double y0, double x1, double y1 )
 {
     std::array<analyticPoint2, 8> current{{
         { x0, y0 }, { x1, y0 }, { x1, y1 }, { x0, y1 }
     }};
     std::array<analyticPoint2, 8> next{};
-    const analyticFluidCircle& circle = firstCap ? capsule.first : capsule.last;
+    const auto& circle = firstCap ? capsule.first : capsule.last;
     const double direction = firstCap ? -1.0 : 1.0;
     const auto signedDistance = [&]( analyticPoint2 p )
     {
@@ -527,7 +566,7 @@ double CapsuleCapRectangleArea( const analyticFluidCapsule& capsule, bool firstC
     return CircleClippedPolygonArea( circle, current, count );
 }
 
-double CapsuleRectangleArea( const analyticFluidCapsule& capsule,
+double CapsuleRectangleArea( const auto& capsule,
     double x0, double y0, double x1, double y1 )
 {
     const double r = capsule.first.radius;
@@ -609,7 +648,7 @@ analyticCircleInterval ClipRoundedCornerFace( const analyticFluidRoundedPolygon&
     const vec2 vertex = polygon.core.vertices[vertexIndex];
     const vec2 previous = polygon.outwardNormals[( vertexIndex + count - 1 ) % count];
     const vec2 next = polygon.outwardNormals[vertexIndex];
-    const auto chord = ClipCircleFace( { vertex, polygon.radius },
+    const auto chord = ClipCircleFace( analyticFluidCircle{ vertex, polygon.radius },
         vertical, coordinate, low, high );
     if( chord.length <= 0.0 ) return {};
 
@@ -715,7 +754,7 @@ double RoundedCornerRectangleArea( const analyticFluidRoundedPolygon& polygon, i
         vertices = nextCount;
     }
     return vertices >= 3
-        ? CircleClippedPolygonArea( { vertex, polygon.radius }, current, vertices ) : 0.0;
+        ? CircleClippedPolygonArea( analyticFluidCircle{ vertex, polygon.radius }, current, vertices ) : 0.0;
 }
 
 double RoundedPolygonRectangleArea( const analyticFluidRoundedPolygon& polygon,
@@ -859,7 +898,7 @@ bool AreDisjointFluidShapes( const fluidShapeObstacle2& first,
 struct analyticDisjointShape2
 {
     std::variant<analyticFluidCircle, analyticFluidPolygon,
-        analyticFluidCapsule, analyticFluidRoundedPolygon> geometry{};
+        analyticFluidCapsule, analyticFluidRoundedPolygon, preciseAnalyticCapsule> geometry{};
     aabb2 bounds{};
     bool occluded = false;
     bool partialCircleOverlap = false;
@@ -912,7 +951,7 @@ bool HasPartialCircleOverlap( const analyticDisjointShape2& first,
 }
 
 std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
-    std::span<const fluidShapeObstacle2> obstacles )
+    std::span<const fluidShapeObstacle2> obstacles, bool preciseCapsule = false )
 {
     if( obstacles.size() < 2 ) return {};
     std::vector<analyticDisjointShape2> shapes;
@@ -927,6 +966,12 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
         analyticFluidPolygon polygon{};
         analyticFluidRoundedPolygon rounded{};
         if( TryGetAnalyticCircle( single, circle ) ) analytic.geometry = circle;
+        else if( preciseCapsule && std::holds_alternative<capsule2>( obstacle.geometry ) )
+        {
+            preciseAnalyticCapsule precise{};
+            if( !TryGetPreciseAnalyticCapsule( obstacle, precise ) ) return {};
+            analytic.geometry = precise;
+        }
         else if( TryGetAnalyticCapsule( single, capsule ) ) analytic.geometry = capsule;
         else if( TryGetAnalyticPolygon( single, polygon ) ) analytic.geometry = polygon;
         else if( TryGetAnalyticRoundedPolygon( single, rounded ) ) analytic.geometry = rounded;
@@ -934,6 +979,24 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
 
         analytic.bounds = ComputeShapeAABB( obstacle.geometry, obstacle.transform );
         if( !IsValidAABB( analytic.bounds ) ) return {};
+        if( const auto* precise = std::get_if<preciseAnalyticCapsule>( &analytic.geometry ) )
+        {
+            const double r = precise->first.radius;
+            // The float broad-phase bound may round inside the precise
+            // clipping geometry. Outward-round the precise capsule bounds.
+            const auto lower = []( double v ) { return std::nextafter( static_cast<float>( v ),
+                -std::numeric_limits<float>::infinity() ); };
+            const auto upper = []( double v ) { return std::nextafter( static_cast<float>( v ),
+                std::numeric_limits<float>::infinity() ); };
+            analytic.bounds.min.x = std::min( analytic.bounds.min.x,
+                lower( std::min( precise->first.center.x, precise->last.center.x ) - r ) );
+            analytic.bounds.min.y = std::min( analytic.bounds.min.y,
+                lower( std::min( precise->first.center.y, precise->last.center.y ) - r ) );
+            analytic.bounds.max.x = std::max( analytic.bounds.max.x,
+                upper( std::max( precise->first.center.x, precise->last.center.x ) + r ) );
+            analytic.bounds.max.y = std::max( analytic.bounds.max.y,
+                upper( std::max( precise->first.center.y, precise->last.center.y ) + r ) );
+        }
         // 실제 분리된 Shape는 원래대로 합산한다. 두 원의 엄격한 포함 관계에
         // 한해서만 내부 원의 모든 면적/face 반력을 무시한다.
         for( std::size_t i = 0; i < shapes.size(); ++i )
@@ -973,10 +1036,68 @@ double DisjointShapeRectangleArea( const analyticDisjointShape2& shape,
             return CircleRectangleArea( geometry, x0, y0, x1, y1 );
         else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
             return ConvexPolygonRectangleArea( geometry, x0, y0, x1, y1 );
-        else if constexpr( std::is_same_v<T, analyticFluidCapsule> )
+        else if constexpr( std::is_same_v<T, analyticFluidCapsule> || std::is_same_v<T, preciseAnalyticCapsule> )
             return CapsuleRectangleArea( geometry, x0, y0, x1, y1 );
         else return RoundedPolygonRectangleArea( geometry, x0, y0, x1, y1 );
     }, shape.geometry );
+}
+
+// A convex solid contains the entire rectangle if it strictly contains all
+// four corners. Use a conservative roundoff guard: ambiguous boundary
+// cases remain on the original area integration path.
+bool CertifiesFullCellCoverage( const analyticDisjointShape2& shape,
+    double x0, double y0, double x1, double y1 )
+{
+    if( shape.occluded ) return false;
+    const double coordinateScale = std::max( { 1.0, std::abs( x0 ), std::abs( y0 ),
+        std::abs( x1 ), std::abs( y1 ), std::abs( static_cast<double>( shape.bounds.min.x ) ),
+        std::abs( static_cast<double>( shape.bounds.min.y ) ),
+        std::abs( static_cast<double>( shape.bounds.max.x ) ),
+        std::abs( static_cast<double>( shape.bounds.max.y ) ) } );
+    const double guard = 128.0 * std::numeric_limits<double>::epsilon() *
+        coordinateScale * coordinateScale;
+    const auto inside = [&]( double x, double y )
+    {
+        return std::visit( [&]( const auto& geometry ) -> bool
+        {
+            using T = std::remove_cvref_t<decltype( geometry )>;
+            const auto insideDisk = [&]( const auto& disk )
+            {
+                const double dx = x - disk.center.x, dy = y - disk.center.y;
+                return disk.radius * disk.radius - ( dx * dx + dy * dy ) > guard;
+            };
+            if constexpr( std::is_same_v<T, analyticFluidCircle> )
+                return insideDisk( geometry );
+            else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
+            {
+                for( int i = 0; i < geometry.count; ++i )
+                {
+                    const auto a = geometry.vertices[i];
+                    const auto b = geometry.vertices[( i + 1 ) % geometry.count];
+                    const double ex = static_cast<double>( b.x ) - a.x;
+                    const double ey = static_cast<double>( b.y ) - a.y;
+                    if( !( ex * ( y - a.y ) - ey * ( x - a.x ) > guard ) ) return false;
+                }
+                return true;
+            }
+            else if constexpr( std::is_same_v<T, preciseAnalyticCapsule> )
+            {
+                if( insideDisk( geometry.first ) || insideDisk( geometry.last ) ) return true;
+                const auto a = geometry.first.center, b = geometry.last.center;
+                const double dx = b.x - a.x, dy = b.y - a.y;
+                const double px = x - a.x, py = y - a.y;
+                const double length2 = dx * dx + dy * dy;
+                const double along = px * dx + py * dy;
+                if( !( along > guard && length2 - along > guard ) ) return false;
+                const double cross = dx * py - dy * px;
+                return geometry.first.radius * geometry.first.radius * length2 -
+                    cross * cross > guard * coordinateScale * coordinateScale;
+            }
+            else return false;
+        }, shape.geometry );
+    };
+    return inside( x0, y0 ) && inside( x1, y0 ) &&
+        inside( x0, y1 ) && inside( x1, y1 );
 }
 
 analyticCircleInterval ClipDisjointShapeFace( const analyticDisjointShape2& shape,
@@ -995,7 +1116,7 @@ analyticCircleInterval ClipDisjointShapeFace( const analyticDisjointShape2& shap
             return ClipCircleFace( geometry, vertical, coordinate, low, high );
         else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
             return ClipPolygonFace( geometry, vertical, coordinate, low, high );
-        else if constexpr( std::is_same_v<T, analyticFluidCapsule> )
+        else if constexpr( std::is_same_v<T, analyticFluidCapsule> || std::is_same_v<T, preciseAnalyticCapsule> )
             return ClipCapsuleFace( geometry, vertical, coordinate, low, high );
         else return ClipRoundedPolygonFace( geometry, vertical, coordinate, low, high );
     }, shape.geometry );
@@ -1269,9 +1390,9 @@ float fluidField2::sampleComponent( const std::vector<float>& values, int width,
     const int j1 = std::min( j + 1, height - 1 );
     const float tx = x - i;
     const float ty = y - j;
-    const float bottom = std::lerp( values[j * width + i], values[j * width + i1], tx );
-    const float top = std::lerp( values[j1 * width + i], values[j1 * width + i1], tx );
-    return std::lerp( bottom, top, ty );
+    const float bottom = deterministicLerp( values[j * width + i], values[j * width + i1], tx );
+    const float top = deterministicLerp( values[j1 * width + i], values[j1 * width + i1], tx );
+    return deterministicLerp( bottom, top, ty );
 }
 
 vec2 fluidField2::sampleFrom( const std::vector<float>& u, const std::vector<float>& v, vec2 position ) const noexcept
@@ -1535,7 +1656,7 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     // Rebuild for this World snapshot. Swept intermediate snapshots differ.
     analyticDisjointCache_.reset();
     auto disjointShapes = disjointAnalyticCutCellEnabled_
-        ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+        ? BuildDisjointAnalyticShapes( obstacles, preciseDisjointCapsuleEnabled_ ) : std::vector<analyticDisjointShape2>{};
     const bool disjointGeometry = !disjointShapes.empty();
     analyticUBlockedFaces_.clear();
     analyticVBlockedFaces_.clear();
@@ -1634,8 +1755,21 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                             std::get<analyticFluidCircle>( disjointShapes[0].geometry ),
                             std::get<analyticFluidCircle>( disjointShapes[1].geometry ),
                             left, bottom, left + h, bottom + h );
-                    cellFluidFraction_[cell] = static_cast<float>(
-                        std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
+                    double fluidFraction = std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 );
+                    // Only correct a near-full subtraction residual when one
+                    // convex obstacle independently certifies full coverage.
+                    // No global minimum fluid fraction or aperture floor.
+                    if( certifiedFullCellCoverageEnabled_ && fluidFraction > 0.0 &&
+                        fluidFraction <= 64.0 * std::numeric_limits<double>::epsilon() )
+                    {
+                        for( const auto& shape : disjointShapes )
+                            if( CertifiesFullCellCoverage( shape, left, bottom, left + h, bottom + h ) )
+                            {
+                                fluidFraction = 0.0;
+                                break;
+                            }
+                    }
+                    cellFluidFraction_[cell] = static_cast<float>( fluidFraction );
                 }
             // For three or more disjoint shapes, the blocked intervals are
             // independent. Accumulate them shape-major in their AABB face
@@ -1999,6 +2133,369 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     if( analyticCutCellCurrentGeometryReuseEnabled_ && disjointGeometry && needsCoupledGeometry )
         analyticDisjointCache_ = std::make_shared<const analyticDisjointCache2>(
             analyticDisjointCache2{ std::move( disjointShapes ) } );
+}
+
+bool fluidField2::rebuildIntervalPressureGeometry( std::span<const fluidShapeObstacle2> obstacles )
+{
+    updateObstacles( obstacles );
+    updateCutCellGeometry( obstacles );
+    return cutCellTransition_.usedDisjointAnalyticGeometry;
+}
+
+void fluidField2::integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
+    std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
+    const fluidDetail::intervalPressureQuadrature& quadrature,
+    fluidDetail::intervalPressureGeometryIntegral& integral ) const
+{
+    const auto& start = previousObstacles_;
+    const auto& finish = frozenPressureObstacles_;
+    const std::size_t owners = finish.size(), n = cellFluidFraction_.size();
+    if( &geometry == this || &panelGeometry == this || &geometry == &panelGeometry ||
+        geometry.width_ != width_ || geometry.height_ != height_ ||
+        panelGeometry.width_ != width_ || panelGeometry.height_ != height_ ||
+        start.size() != owners || poses.size() != owners || motion.size() != owners ||
+        previousCellFluidFraction_.size() != n || !volumeSourceValid_ ||
+        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f ||
+        quadrature.panels.empty() || !std::isfinite( quadrature.weightSum ) || quadrature.weightSum <= 0.0 ||
+        ( owners != 0 && n > std::numeric_limits<std::size_t>::max() / owners ) )
+        throw std::invalid_argument( "interval pressure: invalid panel integration input" );
+
+    auto& [meanU, meanV, fraction, coefficients, transportPanels, weightSum] = integral;
+    // The caller can pre-size these buffers before entering the timed phase.
+    meanU.assign( u_.size(), 0.0 ); meanV.assign( v_.size(), 0.0 );
+    fraction.assign( n, 0.0 ); coefficients.assign( n * owners, fluidDetail::intervalPressureResponse{} );
+    transportPanels.clear();
+    weightSum = 0.0;
+    const auto setPose = [&]( fluidField2& target, float alpha )
+    {
+        fluidDetail::sampleIntervalPressurePoses( start, finish, motion, frozenPressureTimeStep_, alpha, poses );
+        if( !target.rebuildIntervalPressureGeometry( poses ) )
+            throw std::runtime_error( "interval pressure: nonanalytic quadrature geometry" );
+    };
+    for( const auto& sample : quadrature.panels )
+    {
+        const double weight = sample.weight, lo = sample.lo;
+        fluidDetail::transportPanel panel{ weight, {}, std::vector<float>( u_.size() ),
+            std::vector<float>( v_.size() ) };
+        if( lo == 0.0 ) panel.startFraction = previousCellFluidFraction_;
+        else
+        {
+            setPose( panelGeometry, static_cast<float>( lo ) );
+            panel.startFraction = panelGeometry.cellFluidFraction_;
+        }
+        setPose( geometry, sample.alpha );
+        fluidDetail::accumulateIntervalPressureGeometry( geometry.width_, geometry.height_,
+            { geometry.cellFluidFraction_, geometry.uOpenFraction_, geometry.vOpenFraction_ }, weight,
+            fraction, meanU, meanV, panel.uOpen, panel.vOpen );
+        transportPanels.push_back( std::move( panel ) );
+        // Same geometry and same quadrature weight for L and B.
+        std::fill( geometry.divergence_.begin(), geometry.divergence_.end(), 0.0f );
+        if( !geometry.solveCoupledPressure( frozenPressureTimeStep_, 200, poses, true ) )
+            throw std::runtime_error( "interval pressure: zero-RHS boundary assembly failed" );
+        for( const auto& f : geometry.coupledPressureScratch_.faces )
+        {
+            auto& c = coefficients[static_cast<std::size_t>( f.cell ) * owners + f.owner];
+            c.fx += weight * f.fx; c.fy += weight * f.fy; c.torque += weight * f.torque;
+        }
+    }
+    weightSum = quadrature.weightSum;
+    fluidDetail::normalizeIntervalPressureQuadrature( weightSum, meanU, meanV, fraction, coefficients );
+}
+
+fluidDetail::intervalPressureGeometryPreparation fluidField2::prepareIntervalPressureGeometry(
+    int samples, int endpointDepth, bool adaptiveEndpoint, bool refineEndpointFaces ) const
+{
+    const auto& start = previousObstacles_;
+    const auto& finish = frozenPressureObstacles_;
+    if( samples <= 0 || endpointDepth < 0 || endpointDepth > 16 ||
+        ( endpointDepth > 0 && samples < 2 ) ||
+        samples > std::numeric_limits<int>::max() - 2 * endpointDepth ||
+        start.size() != finish.size() || !volumeSourceValid_ ||
+        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f )
+        throw std::invalid_argument( "interval pressure: invalid geometry preparation input" );
+
+    fluidDetail::intervalPressureGeometryPreparation result;
+    result.endpointDepth = endpointDepth;
+    fluidField2 geometry = *this;
+    geometry.setPrePressureSnapshotObserver( {} );
+    geometry.determinismStageObserver_ = {};
+    geometry.setCoupledPressureWarmStartEnabled( false );
+    geometry.setCoupledPressureWarmStartProbeEnabled( false );
+    std::vector<fluidShapeObstacle2> poses( finish.begin(), finish.end() );
+    const auto motion = fluidDetail::prepareIntervalPressurePoseMotion( start, finish, frozenPressureTimeStep_ );
+    fluidField2 panelGeometry = geometry;
+    if( endpointDepth > 0 )
+    {
+        fluidDetail::intervalPressureCoverage coverage( width_, height_,
+            { cellFluidFraction_, uOpenFraction_, vOpenFraction_ }, refineEndpointFaces );
+        for( int step = 0; step < samples; ++step )
+        {
+            fluidDetail::sampleIntervalPressurePoses( start, finish, motion,
+                frozenPressureTimeStep_, ( step + 0.5f ) / samples, poses );
+            if( !geometry.rebuildIntervalPressureGeometry( poses ) )
+                throw std::runtime_error( "interval pressure: nonanalytic coverage geometry" );
+            coverage.observe( { geometry.cellFluidFraction_, geometry.uOpenFraction_, geometry.vOpenFraction_ } );
+        }
+        result.missed = coverage.missingCells( previousCellFluidFraction_, cellFluidFraction_ );
+        result.missedFaces = coverage.missingFaces();
+        if( adaptiveEndpoint && result.missed.empty() && result.missedFaces.empty() )
+            result.endpointDepth = 0;
+    }
+    const auto quadrature = fluidDetail::buildIntervalPressureQuadrature( samples, result.endpointDepth );
+    integrateIntervalPressurePanels( geometry, panelGeometry, poses, motion, quadrature, result.integral );
+    if( result.integral.transportPanels.size() != quadrature.panels.size() ||
+        result.integral.weightSum != quadrature.weightSum )
+        throw std::runtime_error( "interval pressure: geometry panel schedule mismatch" );
+    return result;
+}
+
+fluidDetail::intervalPressureLinearState fluidField2::solvePreparedIntervalPressure(
+    const fluidDetail::intervalPressureGeometryIntegral& integral,
+    const fluidDetail::intervalPressureLinearOptions& options, std::span<const float> seed ) const
+{
+    const double h = cellSize_, dt = frozenPressureTimeStep_;
+    const auto& finish = frozenPressureObstacles_;
+    const std::size_t n = cellFluidFraction_.size(), owners = finish.size();
+    if( !volumeSourceValid_ || !std::isfinite( options.closingVolumeRelativeTolerance ) ||
+        options.closingVolumeRelativeTolerance < 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid prepared linear solve input" );
+
+    fluidDetail::intervalPressureLinearState state;
+    state.graph = fluidDetail::buildIntervalPressureGraph( width_, height_, h, dt,
+        integral.fraction, previousCellFluidFraction_, cellFluidFraction_,
+        { integral.meanU, u_, uOpenFraction_ }, { integral.meanV, v_, vOpenFraction_ } );
+    state.rhs.resize( n );
+    state.sums.resize( n );
+    state.scale = h * h / dt;
+    state.rhsResult = fluidDetail::buildIntervalPressureRhs( state.graph, cellFluidFraction_,
+        state.scale, options.volumeWeightedCompatibility, state.rhs, state.sums );
+    if( state.rhsResult.failedComponent >= 0 ) return state;
+
+    state.force.resize( owners );
+    state.bodies.resize( owners );
+    for( std::size_t j = 0; j < owners; ++j )
+        state.bodies[j] = { static_cast<double>( finish[j].inverseMass ),
+            static_cast<double>( finish[j].inverseInertia ) };
+    const fluidDetail::intervalPressureOperator op( state.graph, integral.coefficients, state.bodies,
+        state.force, state.sums, options.responseScale, options.skipFixedBodyProducts );
+    op.addDiagonal( state.graph.diagonal );
+    if( options.closingVolumeRelativeTolerance > 0.0 )
+        for( std::size_t i = 0; i < n; ++i )
+            if( state.graph.parent[i] >= 0 && previousCellFluidFraction_[i] > 0.0f &&
+                cellFluidFraction_[i] == 0.0f )
+                state.closingRows.emplace_back( i, std::max( 1.0e-18,
+                    options.closingVolumeRelativeTolerance * h * h * previousCellFluidFraction_[i] ) );
+    state.solution = fluidDetail::solveIntervalPressure( state.rhs, op, seed, options.warmStart,
+        dt, options.relativeSquaredTolerance, state.closingRows );
+    return state;
+}
+
+fluidDetail::intervalPressureDefect fluidField2::evaluateIntervalPressureDefect(
+    fluidField2& defectGeometry, const fluidDetail::intervalPressureOperator& op,
+    std::span<const double> pressure, std::span<const fluidObstacleForce2> baselineFeedback,
+    int targetIndex ) const
+{
+    const double h = cellSize_, dt = frozenPressureTimeStep_, area = h * h;
+    const auto& finish = frozenPressureObstacles_;
+    const std::size_t n = cellFluidFraction_.size(), owners = finish.size();
+    if( &defectGeometry == this || defectGeometry.width_ != width_ || defectGeometry.height_ != height_ ||
+        !volumeSourceValid_ || !std::isfinite( h ) || h <= 0.0 || !std::isfinite( dt ) || dt <= 0.0 ||
+        previousCellFluidFraction_.size() != n || op.graph.parent.size() != n ||
+        pressure.size() != n || op.force.size() != owners || baselineFeedback.size() != owners )
+        throw std::invalid_argument( "interval pressure: invalid defect evaluation input" );
+    for( double value : pressure )
+        if( !std::isfinite( value ) )
+            throw std::invalid_argument( "interval pressure: nonfinite defect pressure" );
+    const auto& force = op.force;
+    const auto& edges = op.graph.edges;
+    const auto& parent = op.graph.parent;
+    const double responseScale = op.responseScale;
+    const bool fixedGeometry = responseScale == 0.0;
+    fluidDetail::intervalPressureDefect state;
+    state.residual.resize( n );
+    op.transpose( pressure );
+    std::vector<fluidShapeObstacle2> endpoint( finish.begin(), finish.end() );
+    for( std::size_t j = 0; j < owners; ++j )
+    {
+        const auto& f = force[j];
+        const vec2 dx{ static_cast<float>( responseScale * ( dt * dt * finish[j].inverseMass * f.fx ) ),
+            static_cast<float>( responseScale * ( dt * dt * finish[j].inverseMass * f.fy ) ) };
+        const float da = static_cast<float>( responseScale * ( dt * dt * finish[j].inverseInertia * f.torque ) );
+        if( !IsFinite( dx ) || !std::isfinite( da ) )
+            throw std::runtime_error( "interval pressure: invalid trial displacement" );
+        const rot2 delta = rot2::FromRadians( da );
+        if( !fixedGeometry )
+        {
+            endpoint[j].center = finish[j].center + dx;
+            endpoint[j].transform.position = endpoint[j].center +
+                Rotate( delta, finish[j].transform.position - finish[j].center );
+            endpoint[j].transform.rotation = delta * finish[j].transform.rotation;
+        }
+        state.forceChange = std::max( state.forceChange, std::max(
+            std::abs( f.fx - baselineFeedback[j].force.x ),
+            std::abs( f.fy - baselineFeedback[j].force.y ) ) );
+        state.torqueChange = std::max( state.torqueChange, std::abs( f.torque - baselineFeedback[j].torque ) );
+    }
+    state.analytic = defectGeometry.rebuildIntervalPressureGeometry( endpoint );
+    std::vector<double> fluxVolume( n );
+    for( std::size_t i = 0; i < n; ++i )
+        fluxVolume[i] = area * previousCellFluidFraction_[i];
+    for( const auto& e : edges )
+    {
+        const double velocity = fluidDetail::intervalFaceVelocity( e, pressure, h, dt );
+        const double transfer = fluidDetail::intervalFaceTransfer( e, velocity, h, dt );
+        fluxVolume[e.first] -= transfer;
+        fluxVolume[e.second] += transfer;
+        state.peak = std::max( state.peak, std::abs( velocity ) );
+        if( !e.isU && e.index == targetIndex ) state.target = velocity;
+    }
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        const double fraction = defectGeometry.cellFluidFraction_[i];
+        if( !std::isfinite( fraction ) || fraction < 0.0 || fraction > 1.0 ||
+            !std::isfinite( fluxVolume[i] ) )
+            throw std::runtime_error( "interval pressure: invalid trial volume" );
+        const double error = area * fraction - fluxVolume[i];
+        state.residual[i] = error;
+        state.rawL1 += std::abs( error );
+        state.negativeFlux += std::max( 0.0, -fluxVolume[i] );
+        if( parent[i] < 0 ) state.unsupported += std::abs( error );
+        state.closed += cellFluidFraction_[i] > 0.0f && fraction == 0.0;
+        state.opened += cellFluidFraction_[i] == 0.0f && fraction > 0.0;
+    }
+    const auto raw = state.residual;
+    op.project( state.residual );
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        state.compatibilityL1 += std::abs( raw[i] - state.residual[i] );
+        state.projectedL1 += std::abs( state.residual[i] );
+        state.squared += state.residual[i] * state.residual[i];
+    }
+    return state;
+}
+
+fluidDetail::intervalPressureDefectResult fluidField2::correctIntervalPressureDefect(
+    const fluidDetail::intervalPressureOperator& op, std::span<const double> pressure,
+    std::span<const fluidObstacleForce2> baselineFeedback, int targetIndex, int correctionBudget ) const
+{
+    const std::size_t n = cellFluidFraction_.size();
+    const double dt = frozenPressureTimeStep_;
+    if( correctionBudget < 0 || correctionBudget > 3 || !volumeSourceValid_ ||
+        pressure.size() != n || op.graph.parent.size() != n ||
+        baselineFeedback.size() != frozenPressureObstacles_.size() )
+        throw std::invalid_argument( "interval pressure: invalid defect correction input" );
+    fluidField2 defectGeometry = *this;
+    defectGeometry.setPrePressureSnapshotObserver( {} );
+    defectGeometry.determinismStageObserver_ = {};
+    const auto evaluateDefect = [&]( const std::vector<double>& trialPressure )
+    {
+        return evaluateIntervalPressureDefect( defectGeometry, op, trialPressure, baselineFeedback, targetIndex );
+    };
+    fluidDetail::intervalPressureDefectResult result;
+    result.pressure.assign( pressure.begin(), pressure.end() );
+    auto current = evaluateDefect( result.pressure );
+    if( !current.analytic || current.unsupported != 0.0 )
+        throw std::runtime_error( "interval pressure: baseline trial lacks interval graph support" );
+    result.initialGap = current.rawL1;
+    result.defectEvaluations = 1;
+    result.passes.reserve( static_cast<std::size_t>( correctionBudget + 1 ) );
+    // The actual endpoint derivative is only approximated by the averaged
+    // operator. Accept only a supported trial reducing both defect norms.
+    for( int pass = 0; pass <= correctionBudget; ++pass )
+    {
+        int steps = 0, trials = 0;
+        double acceptedStep = 0.0, relativeSquared = 0.0;
+        if( pass > 0 && !result.stalled )
+        {
+            const auto solvedCorrection = fluidDetail::solveIntervalPressureCorrection(
+                current.residual, op, dt );
+            const auto& correction = solvedCorrection.pressure;
+            steps = solvedCorrection.iterations;
+            relativeSquared = solvedCorrection.relativeSquared;
+            result.correctionIterations += steps;
+            // Fixed deterministic backtracking. Reject invalid geometry
+            // or any step which fails to decrease both raw L1 and
+            // projected squared defect. Do not discard unsupported rows.
+            for( double alpha : { 1.0, 0.5, 0.25, 0.125 } )
+            {
+                ++trials;
+                auto trialPressure = result.pressure;
+                for( std::size_t i = 0; i < n; ++i ) trialPressure[i] += alpha * correction[i];
+                op.project( trialPressure );
+                auto trial = evaluateDefect( trialPressure );
+                ++result.defectEvaluations;
+                if( trial.analytic && trial.unsupported == 0.0 &&
+                    trial.rawL1 < current.rawL1 && trial.squared < current.squared )
+                {
+                    result.pressure = std::move( trialPressure );
+                    current = std::move( trial );
+                    acceptedStep = alpha;
+                    break;
+                }
+            }
+            result.stalled = acceptedStep == 0.0;
+        }
+        result.passes.push_back( { current.rawL1, current.projectedL1, current.squared, current.compatibilityL1,
+            current.negativeFlux, current.peak, current.target, current.unsupported,
+            current.forceChange, current.torqueChange, current.closed, current.opened,
+            acceptedStep, steps, trials, relativeSquared, result.stalled } );
+    }
+    if( current.rawL1 > result.initialGap )
+        throw std::runtime_error( "interval pressure: accepted geometric defect increased" );
+    result.final = std::move( current );
+    // A rejected trial or PCG multiply may have overwritten force scratch.
+    op.transpose( result.pressure );
+    return result;
+}
+
+fluidDetail::intervalPressureCandidate fluidField2::buildIntervalPressureCandidate(
+    const fluidDetail::intervalPressureGeometryIntegral& integral,
+    const fluidDetail::intervalPressureLinearState& linear,
+    const fluidDetail::intervalPressureDefectResult& defect, bool captureIntervalVelocity ) const
+{
+    const std::size_t n = cellFluidFraction_.size(), owners = frozenPressureObstacles_.size();
+    const double h = cellSize_, dt = frozenPressureTimeStep_;
+    if( !volumeSourceValid_ || !linear.solution || linear.rhsResult.failedComponent >= 0 ||
+        !defect.final.analytic || defect.final.unsupported != 0.0 || defect.passes.empty() ||
+        defect.pressure.size() != n || linear.force.size() != owners ||
+        defect.final.residual.size() != n )
+        throw std::invalid_argument( "interval pressure: invalid candidate input" );
+
+    auto reconstructed = fluidDetail::reconstructIntervalPressure( width_, height_, h, dt,
+        linear.graph, defect.pressure, previousCellFluidFraction_, cellFluidFraction_,
+        { integral.meanU, u_, uOpenFraction_ }, { integral.meanV, v_, vOpenFraction_ },
+        captureIntervalVelocity );
+    fluidDetail::intervalPressureCandidate result;
+    result.u = std::move( reconstructed.u );
+    result.v = std::move( reconstructed.v );
+    result.fluxVolume = std::move( reconstructed.fluxVolume );
+    result.uncoveredEndpointFaces = reconstructed.uncoveredEndpointFaces;
+    const auto checkedFloat = []( double value )
+    {
+        if( !std::isfinite( value ) || std::abs( value ) > std::numeric_limits<float>::max() )
+            throw std::runtime_error( "interval pressure: candidate float overflow" );
+        return static_cast<float>( value );
+    };
+    result.pressure.resize( n );
+    for( std::size_t i = 0; i < n; ++i )
+        result.pressure[i] = checkedFloat( defect.pressure[i] );
+    result.feedback.resize( owners );
+    for( std::size_t i = 0; i < owners; ++i )
+    {
+        result.feedback[i].force = { checkedFloat( linear.force[i].fx ), checkedFloat( linear.force[i].fy ) };
+        result.feedback[i].torque = checkedFloat( linear.force[i].torque );
+    }
+    for( double volume : result.fluxVolume )
+        if( !std::isfinite( volume ) )
+            throw std::runtime_error( "interval pressure: nonfinite candidate flux volume" );
+    result.component = linear.graph.parent;
+    if( captureIntervalVelocity )
+    {
+        result.meanU = integral.meanU; result.meanV = integral.meanV;
+        result.intervalU = std::move( reconstructed.intervalU );
+        result.intervalV = std::move( reconstructed.intervalV );
+    }
+    return result;
 }
 
 void fluidField2::remapExposedFaces()
@@ -2523,6 +3020,46 @@ void fluidField2::transportTracer( float timeStep )
     tracerStats_.afterMass = getTracerMass();
 }
 
+bool fluidField2::commitIntervalTracer(
+    const std::vector<double>& startVolume, const fluidDetail::transportRepairResult& repair,
+    const std::vector<fluidDetail::transportFaceSample>& mapping,
+    const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum )
+{
+    if( !tracerEnabled_ ) return false;
+    if( startVolume.size() != cellFluidFraction_.size() ||
+        tracerMass_.size() != cellFluidFraction_.size() )
+        throw std::invalid_argument( "fluidField2: interval tracer extent mismatch" );
+    for( float fraction : cellFluidFraction_ )
+        if( !std::isfinite( fraction ) || fraction < 0.0f || fraction > 1.0f )
+            throw std::invalid_argument( "fluidField2: invalid interval endpoint fraction" );
+
+    const double h = cellSize_, area = h * h;
+    auto result = fluidDetail::consumeHybridTransport( repair, startVolume, tracerMass_,
+        area, mapping, sampledPanels, weightSum );
+    if( !result ) return false;
+
+    double after = 0.0, trapped = 0.0;
+    for( std::size_t i = 0; i < result->mass.size(); ++i )
+    {
+        after += result->mass[i];
+        if( cellFluidFraction_[i] == 0.0f ) trapped += result->mass[i];
+    }
+    fluidTracerStats2 stats{};
+    stats.beforeMass = getTracerMass();
+    stats.afterMass = static_cast<float>( after );
+    stats.trappedMass = static_cast<float>( trapped );
+    // Count executed time panels. Legacy swept-remap and CFL statistics
+    // do not describe this interval path and are not populated.
+    stats.substeps = result->panels;
+    if( !std::isfinite( stats.beforeMass ) || !std::isfinite( stats.afterMass ) ||
+        !std::isfinite( stats.trappedMass ) )
+        throw std::runtime_error( "fluidField2: interval tracer statistics overflow" );
+
+    tracerMass_.swap( result->mass );
+    tracerStats_ = stats;
+    return true;
+}
+
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
     std::span<fluidObstacleForce2> feedback, int pressureIterations )
 {
@@ -2578,14 +3115,17 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     }
 
     stepMomentum_.before = getFluidMomentum();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 0 );
     record( stepTiming_.other );
     updateObstacles( obstacles );
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 1 );
     record( stepTiming_.occupancy );
     updateCutCellGeometry( obstacles );
     if( auditFace )
         faceStageAudit_.openFraction = faceStageAuditIsU_
             ? cutCellUOpen( faceStageAuditX_, faceStageAuditY_ )
             : cutCellVOpen( faceStageAuditX_, faceStageAuditY_ );
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 2 );
     record( stepTiming_.geometry );
     if( cutCellProjectionEnabled_ )
     {
@@ -2593,14 +3133,17 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         reconcileSweptSolidFlux();
     }
     else sweptFaceFlux_ = {};
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 3 );
     record( stepTiming_.swept );
     remapExposedFaces();
     if( auditFace ) faceStageAudit_.afterRemap = readAuditFace();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 4 );
     record( stepTiming_.remap );
     stepMomentum_.afterObstacles = getFluidMomentum();
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
     if( auditFace ) faceStageAudit_.afterBoundary = readAuditFace();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 5 );
 
     advectionStats_ = {};
     advectionStats_.conservative = conservativeAdvectionEnabled_;
@@ -2632,10 +3175,12 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         v_.swap( nextV_ );
         advectionStats_.substeps = 1;
     }
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 6 );
     record( stepTiming_.advection );
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
     if( auditFace ) faceStageAudit_.afterAdvection = readAuditFace();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 7 );
     advectionStats_.after = getAdvectionFaceMomentum();
     stepMomentum_.afterAdvection = getFluidMomentum();
     record( stepTiming_.boundaries );
@@ -2668,6 +3213,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 8 );
     if( auditFace )
     {
         faceStageAudit_.afterPressure = readAuditFace();
@@ -2746,6 +3292,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     }
     record( stepTiming_.pressure );
     transportTracer( timeStep );
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 9 );
     record( stepTiming_.tracer );
     previousObstacles_.assign( obstacles.begin(), obstacles.end() );
     record( stepTiming_.other );
@@ -2823,7 +3370,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     int partialFaces = 0;
     const auto referenceShapes = analyticDisjointCache_
         ? std::vector<analyticDisjointShape2>{} : disjointAnalyticCutCellEnabled_
-            ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+            ? BuildDisjointAnalyticShapes( obstacles, preciseDisjointCapsuleEnabled_ ) : std::vector<analyticDisjointShape2>{};
     const auto& disjointShapes = analyticDisjointCache_
         ? analyticDisjointCache_->shapes : referenceShapes;
     if( !disjointShapes.empty() )
@@ -3057,8 +3604,8 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
 
         const vec2 displacement = finish.transform.position - start.transform.position;
         linearSpeeds[i] = displacement / timeStep;
-        const float startAngle = std::atan2( start.transform.rotation.s, start.transform.rotation.c );
-        const float endAngle = std::atan2( finish.transform.rotation.s, finish.transform.rotation.c );
+        const float startAngle = deterministicAtan2( start.transform.rotation.s, start.transform.rotation.c );
+        const float endAngle = deterministicAtan2( finish.transform.rotation.s, finish.transform.rotation.c );
         const float deltaAngle = std::remainder( endAngle - startAngle, 2.0f * std::numbers::pi_v<float> );
         startAngles[i] = startAngle;
         angularSpeeds[i] = deltaAngle / timeStep;
@@ -3116,7 +3663,7 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             }
 
             const auto disjointShapes = disjointAnalyticCutCellEnabled_
-                ? BuildDisjointAnalyticShapes( intermediate ) : std::vector<analyticDisjointShape2>{};
+                ? BuildDisjointAnalyticShapes( intermediate, preciseDisjointCapsuleEnabled_ ) : std::vector<analyticDisjointShape2>{};
             if( !disjointShapes.empty() )
             {
                 const double h = cellSize_;
@@ -3975,7 +4522,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     {
         const auto referenceShapes = analyticDisjointCache_
             ? std::vector<analyticDisjointShape2>{} : disjointAnalyticCutCellEnabled_
-                ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+                ? BuildDisjointAnalyticShapes( obstacles, preciseDisjointCapsuleEnabled_ ) : std::vector<analyticDisjointShape2>{};
         const auto& disjointShapes = analyticDisjointCache_
             ? analyticDisjointCache_->shapes : referenceShapes;
         if( !disjointShapes.empty() )
