@@ -1851,83 +1851,13 @@ struct fluidStateTraceProbe2
         // response in the residual, not the averaged L/B operator.
         // Each iterate is a counterfactual pose from the original endpoint.
         const std::string defectKey = "geometryDefectCorrection." + handoffKey;
-        struct defectState
-        {
-            std::vector<double> residual;
-            double rawL1 = 0.0, projectedL1 = 0.0, squared = 0.0, compatibilityL1 = 0.0;
-            double negativeFlux = 0.0, peak = 0.0, target = 0.0, unsupported = 0.0;
-            double forceChange = 0.0, torqueChange = 0.0;
-            int closed = 0, opened = 0;
-            bool analytic = true;
-        };
         fluidField2 defectGeometry = before;
         defectGeometry.setPrePressureSnapshotObserver( {} );
         setStageObserver( defectGeometry, {} );
         const auto evaluateDefect = [&]( const std::vector<double>& pressure )
         {
-            defectState state;
-            state.residual.resize( n );
-            pressureOperator.transpose( pressure );
-            std::vector<fluidShapeObstacle2> endpoint( finish.begin(), finish.end() );
-            for( std::size_t j = 0; j < owners; ++j )
-            {
-                const auto& f = force[j];
-                const vec2 dx{ static_cast<float>( responseScale * ( dt * dt * finish[j].inverseMass * f.fx ) ),
-                    static_cast<float>( responseScale * ( dt * dt * finish[j].inverseMass * f.fy ) ) };
-                const float da = static_cast<float>( responseScale * ( dt * dt * finish[j].inverseInertia * f.torque ) );
-                if( !IsFinite( dx ) || !std::isfinite( da ) )
-                    throw std::runtime_error( defectKey + " invalid trial displacement" );
-                const rot2 delta = rot2::FromRadians( da );
-                if( !fixedGeometry )
-                {
-                    endpoint[j].center = finish[j].center + dx;
-                    endpoint[j].transform.position = endpoint[j].center +
-                        Rotate( delta, finish[j].transform.position - finish[j].center );
-                    endpoint[j].transform.rotation = delta * finish[j].transform.rotation;
-                }
-                state.forceChange = std::max( state.forceChange, std::max(
-                    std::abs( f.fx - baselineFeedback[j].force.x ),
-                    std::abs( f.fy - baselineFeedback[j].force.y ) ) );
-                state.torqueChange = std::max( state.torqueChange, std::abs( f.torque - baselineFeedback[j].torque ) );
-            }
-            defectGeometry.updateObstacles( endpoint );
-            defectGeometry.updateCutCellGeometry( endpoint );
-            state.analytic = defectGeometry.cutCellTransition_.usedDisjointAnalyticGeometry;
-            std::vector<double> fluxVolume( n );
-            for( std::size_t i = 0; i < n; ++i )
-                fluxVolume[i] = area * before.previousCellFluidFraction_[i];
-            for( const auto& e : edges )
-            {
-                const double velocity = fluidDetail::intervalFaceVelocity( e, pressure, h, dt );
-                const double transfer = fluidDetail::intervalFaceTransfer( e, velocity, h, dt );
-                fluxVolume[e.first] -= transfer;
-                fluxVolume[e.second] += transfer;
-                state.peak = std::max( state.peak, std::abs( velocity ) );
-                if( !e.isU && e.index == targetIndex ) state.target = velocity;
-            }
-            for( std::size_t i = 0; i < n; ++i )
-            {
-                const double fraction = defectGeometry.cellFluidFraction_[i];
-                if( !std::isfinite( fraction ) || fraction < 0.0 || fraction > 1.0 ||
-                    !std::isfinite( fluxVolume[i] ) )
-                    throw std::runtime_error( defectKey + " invalid trial volume" );
-                const double error = area * fraction - fluxVolume[i];
-                state.residual[i] = error;
-                state.rawL1 += std::abs( error );
-                state.negativeFlux += std::max( 0.0, -fluxVolume[i] );
-                if( parent[i] < 0 ) state.unsupported += std::abs( error );
-                state.closed += before.cellFluidFraction_[i] > 0.0f && fraction == 0.0;
-                state.opened += before.cellFluidFraction_[i] == 0.0f && fraction > 0.0;
-            }
-            const auto raw = state.residual;
-            pressureOperator.project( state.residual );
-            for( std::size_t i = 0; i < n; ++i )
-            {
-                state.compatibilityL1 += std::abs( raw[i] - state.residual[i] );
-                state.projectedL1 += std::abs( state.residual[i] );
-                state.squared += state.residual[i] * state.residual[i];
-            }
-            return state;
+            return before.evaluateIntervalPressureDefect( defectGeometry, pressureOperator,
+                pressure, baselineFeedback, targetIndex );
         };
         // Solve P A P dp = -P(volume defect)/dt^2 with the unchanged
         // positive operator. The real endpoint derivative is only
@@ -3129,6 +3059,24 @@ struct fluidStateTraceProbe2
         if( !correctionBreakdownRejected || !correctionExtentRejected )
             throw std::runtime_error( "R4bw invalid correction accepted" );
         std::puts( "R4bw interval defect correction regressions passed" );
+
+        fluidField2 defectScratch = noIntervalHistory;
+        bool defectHistoryRejected = false, defectAliasRejected = false;
+        try
+        {
+            (void)noIntervalHistory.evaluateIntervalPressureDefect( defectScratch, exactOperator,
+                exactCorrection.pressure, {}, -1 );
+        }
+        catch( const std::invalid_argument& ) { defectHistoryRejected = true; }
+        try
+        {
+            (void)defectScratch.evaluateIntervalPressureDefect( defectScratch, exactOperator,
+                exactCorrection.pressure, {}, -1 );
+        }
+        catch( const std::invalid_argument& ) { defectAliasRejected = true; }
+        if( !defectHistoryRejected || !defectAliasRejected )
+            throw std::runtime_error( "R4bx invalid defect evaluation accepted" );
+        std::puts( "R4bx interval defect evaluation regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
