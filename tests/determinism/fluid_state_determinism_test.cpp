@@ -3209,14 +3209,30 @@ struct fluidStateTraceProbe2
         if( mapping.size() != repair.faces.size() )
             throw std::runtime_error( "R4ax missing geometric faces" );
         auto mass = seed;
+        // R4ay: a unit-concentration scalar must reproduce geometric
+        // volume if every panel obeys discrete geometric conservation
+        // and donor requests are supported. Audit those conditions separately.
+        std::vector<double> uniform( n ), ledger( n ), panelVolume( n ), incoming( n );
+        for( std::size_t i = 0; i < n; ++i )
+            uniform[i] = ledger[i] = area * candidate.geometricPanels.front().startFraction[i];
+        double uniformInitialMass = 0.0;
+        for( double value : uniform ) uniformInitialMass += value;
+        double panelGeometryL1 = 0.0, maxPanelGeometryError = 0.0;
+        double maxIntermediateNegative = 0.0, maxUniformGeometryError = 0.0;
+        double maxUniformConcentration = 0.0;
         std::vector<double> sums( mapping.size() ), amounts( mapping.size() ), outgoing( n );
         double unserved = 0.0, zeroCapacityOutgoing = 0.0;
         int limitedDonors = 0;
-        for( const auto& panel : candidate.geometricPanels )
+        for( std::size_t step = 0; step < candidate.geometricPanels.size(); ++step )
         {
+            const auto& panel = candidate.geometricPanels[step];
+            const auto& endFraction = step + 1 < candidate.geometricPanels.size() ?
+                candidate.geometricPanels[step + 1].startFraction : field.cellFluidFraction_;
             if( panel.startFraction.size() != n || panel.weight <= 0.0 )
                 throw std::runtime_error( "R4ax invalid sampled panel" );
             std::fill( outgoing.begin(), outgoing.end(), 0.0 );
+            std::fill( incoming.begin(), incoming.end(), 0.0 );
+            for( std::size_t i = 0; i < n; ++i ) panelVolume[i] = area * panel.startFraction[i];
             for( std::size_t j = 0; j < mapping.size(); ++j )
             {
                 const auto& f = mapping[j];
@@ -3227,8 +3243,12 @@ struct fluidStateTraceProbe2
                 if( !std::isfinite( amount ) ) throw std::runtime_error( "R4ax nonfinite transfer" );
                 amounts[j] = amount; sums[j] += amount;
                 outgoing[amount >= 0.0 ? edge.first : edge.second] += std::abs( amount );
+                incoming[amount >= 0.0 ? edge.second : edge.first] += std::abs( amount );
+                panelVolume[edge.first] -= amount; panelVolume[edge.second] += amount;
+                ledger[edge.first] -= amount; ledger[edge.second] += amount;
             }
             std::vector<double> remaining = mass, received( n );
+            std::vector<double> uniformRemaining = uniform, uniformReceived( n );
             for( std::size_t i = 0; i < n; ++i )
             {
                 const double capacity = area * panel.startFraction[i];
@@ -3254,12 +3274,39 @@ struct fluidStateTraceProbe2
                     std::max( capacity, outgoing[donor] ) );
                 const double moved = std::min( remaining[donor], request );
                 remaining[donor] -= moved; received[recipient] += moved;
+                const double uniformRequest = uniform[donor] * ( std::abs( amount ) /
+                    std::max( capacity, outgoing[donor] ) );
+                const double uniformMoved = std::min( uniformRemaining[donor], uniformRequest );
+                uniformRemaining[donor] -= uniformMoved;
+                uniformReceived[recipient] += uniformMoved;
             }
             for( std::size_t i = 0; i < n; ++i )
             {
                 mass[i] = remaining[i] + received[i];
                 if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
                     throw std::runtime_error( "R4ax invalid geometric scalar mass" );
+                uniform[i] = uniformRemaining[i] + uniformReceived[i];
+                const double endVolume = area * endFraction[i];
+                const double localError = std::abs( panelVolume[i] - endVolume );
+                panelGeometryL1 += localError;
+                maxPanelGeometryError = std::max( maxPanelGeometryError, localError );
+                maxIntermediateNegative = std::max( maxIntermediateNegative, -ledger[i] );
+                maxUniformGeometryError = std::max( maxUniformGeometryError,
+                    std::abs( uniform[i] - endVolume ) );
+                if( !std::isfinite( uniform[i] ) || uniform[i] < 0.0 ||
+                    !std::isfinite( ledger[i] ) || !std::isfinite( localError ) )
+                    throw std::runtime_error( "R4ay invalid panel volume or uniform mass" );
+                if( endVolume > 0.0 )
+                    maxUniformConcentration = std::max( maxUniformConcentration, uniform[i] / endVolume );
+                // A final closed cell can retain mass even when its donor
+                // capacity never limited a request; measure its last-panel
+                // incoming/outgoing and geometric residual without clamping.
+                if( step + 1 == candidate.geometricPanels.size() && endVolume == 0.0 &&
+                    ( uniform[i] > 0.0 || mass[i] > seed[i] || panel.startFraction[i] > 0.0f ) )
+                    std::printf( "R4ay interval%d closingCell %zu startVolume %.17g incoming %.17g "
+                        "outgoing %.17g localVolume %.17g integratedVolume %.17g uniformRemaining %.17g "
+                        "scalarRemaining %.17g\n", index, i, area * panel.startFraction[i],
+                        incoming[i], outgoing[i], panelVolume[i], ledger[i], uniform[i], mass[i] );
             }
         }
         double transferError = 0.0, transferL1 = 0.0;
@@ -3279,6 +3326,19 @@ struct fluidStateTraceProbe2
             if( volume > 0.0 ) peak = std::max( peak, mass[i] / volume );
             else trapped += mass[i];
         }
+        double uniformTotal = 0.0, uniformTrapped = 0.0, uniformEndL1 = 0.0, ledgerError = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double volume = area * field.cellFluidFraction_[i];
+            uniformTotal += uniform[i];
+            uniformEndL1 += std::abs( uniform[i] - volume );
+            ledgerError += std::abs( ledger[i] - repair.ledger[i] );
+            if( volume == 0.0 ) uniformTrapped += uniform[i];
+        }
+        const double uniformMassError = uniformTotal - uniformInitialMass;
+        if( std::abs( uniformMassError ) > 1.0e-12 * std::max( 1.0, uniformInitialMass ) ||
+            ledgerError > 1.0e-12 * std::max( 1.0, uniformInitialMass ) )
+            throw std::runtime_error( "R4ay uniform conservation or integrated ledger audit failed" );
         const double massError = finalMass - initialMass;
         if( std::abs( massError ) > 1.0e-12 * std::max( 1.0, initialMass ) )
             throw std::runtime_error( "R4ax geometric tracer mass conservation failed" );
@@ -3293,6 +3353,18 @@ struct fluidStateTraceProbe2
         emit( ".zeroCapacityOutgoing", zeroCapacityOutgoing ); emit( ".transferError", transferError );
         emit( ".massError", massError ); emit( ".peakConcentration", peak );
         emit( ".trapped", trapped ); emit( ".deltaL1", deltaL1 );
+        emit( ".panelGeometryL1", panelGeometryL1 );
+        emit( ".maxPanelGeometryError", maxPanelGeometryError );
+        emit( ".maxIntermediateNegative", maxIntermediateNegative );
+        emit( ".maxUniformGeometryError", maxUniformGeometryError );
+        emit( ".maxUniformConcentration", maxUniformConcentration );
+        emit( ".uniformTrapped", uniformTrapped ); emit( ".uniformEndL1", uniformEndL1 );
+        emit( ".uniformMassError", uniformMassError ); emit( ".ledgerError", ledgerError );
+        std::printf( "R4ay interval%d panelGeometryL1 %.17g maxPanelError %.17g intermediateNegative %.17g "
+            "maxUniformError %.17g maxUniformConcentration %.17g uniformTrapped %.17g "
+            "uniformEndL1 %.17g uniformMassError %.17g ledgerError %.17g\n", index, panelGeometryL1,
+            maxPanelGeometryError, maxIntermediateNegative, maxUniformGeometryError, maxUniformConcentration,
+            uniformTrapped, uniformEndL1, uniformMassError, ledgerError );
         std::printf( "R4ax interval%d geometricPanels %zu limitedDonors %d unserved %.17g "
             "zeroCapacityOutgoing %.17g transferError %.17g massError %.17g peak %.17g "
             "trapped %.17g deltaL1 %.17g equalUnserved %.17g\n",
