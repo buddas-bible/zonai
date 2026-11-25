@@ -454,6 +454,7 @@ jobs:
               "forwardFixedPressureCost": 624,
               "forwardOptimized": 352448, "forwardOptimizedEndpoint": 1024,
               "forwardOptimizedMomentum": 256, "forwardExtendedAudit": 768,
+              "forwardPersistentTracer": 3138,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
