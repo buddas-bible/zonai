@@ -3580,7 +3580,7 @@ struct fluidStateTraceProbe2
                 const auto measureHybrid = [&]()
                 {
                     const auto begin = benchmarkClock::now();
-                    const auto trial = consumeHybridTracer( field, candidate, repair, startVolume,
+                    const auto trial = consumeHybridTracer( field, candidate, repair, mapping, startVolume,
                         outgoing, adaptivePanels, history.hybrid );
                     hybridMs = elapsedMs( begin, benchmarkClock::now() );
                     if( trial.mass != mass || trial.volume != volume || trial.panels != panels ||
