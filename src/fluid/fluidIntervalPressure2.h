@@ -282,6 +282,30 @@ struct intervalPressureDefect
     bool analytic = true;
 };
 
+// Scalar-only per-pass diagnostics; do not retain the full residual
+// vector for every rejected or accepted trial.
+struct intervalPressureDefectPass
+{
+    double rawL1, projectedL1, squared, compatibilityL1;
+    double negativeFlux, peak, target, unsupported;
+    double forceChange, torqueChange;
+    int closed, opened;
+    double acceptedStep;
+    int steps, trials;
+    double relativeSquared;
+    bool stalled;
+};
+
+struct intervalPressureDefectResult
+{
+    std::vector<double> pressure;
+    intervalPressureDefect final;
+    std::vector<intervalPressureDefectPass> passes;
+    double initialGap = 0.0;
+    int correctionIterations = 0, defectEvaluations = 0;
+    bool stalled = false;
+};
+
 struct intervalPressureCorrection
 {
     std::vector<double> pressure;
