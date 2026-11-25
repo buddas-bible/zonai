@@ -3981,6 +3981,7 @@ struct fluidStateTraceProbe2
         if( staggered )
         {
             state.field.preciseDisjointCapsuleEnabled_ = true;
+            state.field.certifiedFullCellCoverageEnabled_ = optimized;
             state.field.updateObstacles( state.poses );
             state.field.updateCutCellGeometry( state.poses );
             if( !state.field.cutCellTransition_.usedDisjointAnalyticGeometry )
