@@ -7,11 +7,7 @@
 #include <vector>
 
 #include "fluid/fluidTransport2.h"
-
-namespace zonai
-{
-struct fluidShapeObstacle2;
-}
+#include "fluid/fluidField2.h"
 
 namespace zonai::fluidDetail
 {
@@ -304,6 +300,19 @@ struct intervalPressureDefectResult
     double initialGap = 0.0;
     int correctionIterations = 0, defectEvaluations = 0;
     bool stalled = false;
+};
+
+// Candidate reconstructed on the frozen endpoint geometry. Interval flux
+// volume is not endpoint flux, and may need conservative closing-cell
+// repair. This is not a committed field or World transaction.
+struct intervalPressureCandidate
+{
+    std::vector<float> u, v, pressure;
+    std::vector<fluidObstacleForce2> feedback;
+    std::vector<double> fluxVolume;
+    std::vector<double> meanU, meanV, intervalU, intervalV;
+    std::vector<int> component;
+    int uncoveredEndpointFaces = 0;
 };
 
 struct intervalPressureCorrection
