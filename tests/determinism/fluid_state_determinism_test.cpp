@@ -5546,7 +5546,7 @@ struct fluidStateTraceProbe2
         forwardEndpointState state{ initial, initial.frozenPressureObstacles_,
             std::vector<fluidObstacleForce2>( initialLoad.begin(), initialLoad.end() ) };
         if( state.poses.size() != 3 || initialLoad.size() != 3 || dt <= 0.0f ||
-            initial.width_ != 48 || initial.height_ != 28 )
+            initial.width_ != 48 || initial.height_ != 28 || !initial.cutCellProjectionEnabled_ )
             throw std::runtime_error( "R4v invalid initial fixture" );
         state.field.setPrePressureSnapshotObserver( {} );
         setStageObserver( state.field, {} );
@@ -5592,11 +5592,9 @@ struct fluidStateTraceProbe2
                     0.5f * 8.0f * dt * rot2::FromRadians( 1.7f * windTime ).s }, 1.7f );
                 // Advect on the actual start geometry, before the forward
                 // pressure/geometry trial. No discarded pressure solve.
-                pre.applyCutCellBoundaries();
-                if( pre.conservativeAdvectionEnabled_ )
-                    pre.advectConservative( dt );
-                else pre.advectSemiLagrangian( dt );
-                pre.applyCutCellBoundaries();
+                pre.applyAdvectionBoundaries( state.poses );
+                pre.advectVelocity( dt );
+                pre.applyAdvectionBoundaries( state.poses );
             }
             // Keep reference/seed and start poses independent of the output
             // object so an accepted commit cannot alias its input.
