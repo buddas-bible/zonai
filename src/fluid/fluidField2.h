@@ -15,6 +15,14 @@ namespace zonai
 
 struct analyticDisjointCache2;
 
+namespace fluidDetail
+{
+struct transportRepairResult;
+struct transportFaceSample;
+struct transportPanel;
+}
+
+
 // Body 좌표가 아닌 유체 world 좌표. 원형 solid의 cell-centered occupancy 근사.
 struct fluidCircleObstacle2
 {
@@ -828,6 +836,12 @@ private:
     void advectConservative( float timeStep );
     [[nodiscard]] float tracerCellFraction( int x, int y ) const noexcept;
     void transportTracer( float timeStep );
+    // Accepted interval-average pressure transport only. The caller owns
+    // geometry/pressure preparation; never consume endpoint MAC as interval flux.
+    [[nodiscard]] bool commitIntervalTracer(
+        const std::vector<double>& startVolume, const fluidDetail::transportRepairResult& repair,
+        const std::vector<fluidDetail::transportFaceSample>& mapping,
+        const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum );
     void remapTracerSwept();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
