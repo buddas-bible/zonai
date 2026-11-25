@@ -7,6 +7,27 @@
 namespace zonai::fluidDetail
 {
 
+void projectIntervalPressureGauge( std::span<double> values, std::span<const int> parent,
+    std::span<const int> count, std::span<double> sums )
+{
+    std::fill( sums.begin(), sums.end(), 0.0 );
+    for( std::size_t i = 0; i < values.size(); ++i )
+        if( parent[i] >= 0 ) sums[parent[i]] += values[i];
+    for( std::size_t i = 0; i < values.size(); ++i )
+        if( parent[i] >= 0 ) values[i] -= sums[parent[i]] / count[parent[i]];
+}
+
+void multiplyIntervalPressureGraph( std::span<const intervalPressureEdge> edges,
+    std::span<const double> pressure, std::span<double> out )
+{
+    std::fill( out.begin(), out.end(), 0.0 );
+    for( const auto& e : edges )
+    {
+        const double d = e.a * ( pressure[e.first] - pressure[e.second] );
+        out[e.first] += d; out[e.second] -= d;
+    }
+}
+
 intervalPressureResult solveIntervalPressure(
     const std::vector<double>& rhs, const std::vector<double>& diagonal,
     const std::vector<int>& parent, std::span<const float> seed, bool warmStart,
