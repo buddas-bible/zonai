@@ -1740,10 +1740,6 @@ struct fluidStateTraceProbe2
         // Explicit component zero-mean constraint. Unlike production, the
         // prototype solves P A P p = P b and reports the unprojected residual.
         std::vector<double> sums( n );
-        const auto zeroMean = [&]( std::vector<double>& v )
-        {
-            fluidDetail::projectIntervalPressureGauge( v, parent, count, sums );
-        };
         const double scale = h * h / dt;
         const auto rhsResult = fluidDetail::buildIntervalPressureRhs( graph, before.cellFluidFraction_,
             scale, volumeWeightedCompatibility, rhs, sums );
@@ -1779,18 +1775,9 @@ struct fluidStateTraceProbe2
         for( std::size_t j = 0; j < owners; ++j )
             bodies[j] = { static_cast<double>( finish[j].inverseMass ),
                 static_cast<double>( finish[j].inverseInertia ) };
-        const auto transpose = [&]( const std::vector<double>& p )
-        {
-            fluidDetail::transposeIntervalPressureBodies( coefficients, p, force );
-        };
-        const auto multiply = [&]( const std::vector<double>& p, std::vector<double>& out )
-        {
-            fluidDetail::multiplyIntervalPressureGraph( edges, p, out );
-            if( skipFixedBodyProducts ) return;
-            transpose( p );
-            fluidDetail::addIntervalPressureSchur( coefficients, bodies, force, responseScale, out );
-        };
-        fluidDetail::addIntervalPressureSchurDiagonal( coefficients, bodies, responseScale, diagonal );
+        const fluidDetail::intervalPressureOperator pressureOperator( graph, coefficients, bodies,
+            force, sums, responseScale, skipFixedBodyProducts );
+        pressureOperator.addDiagonal( diagonal );
 
         const auto dot = [&]( const std::vector<double>& a, const std::vector<double>& b )
         {
@@ -1807,12 +1794,9 @@ struct fluidStateTraceProbe2
                         closingVolumeRelativeTolerance * h * h * before.previousCellFluidFraction_[i] ) );
         const std::span<const float> seed = previousForwardPressure.empty() ?
             std::span<const float>( baseline.pressure_ ) : previousForwardPressure;
-        auto solved = fluidDetail::solveIntervalPressure( rhs, diagonal, parent, seed, warmStart,
-            dt, relativeSquaredTolerance, closingRows, multiply, zeroMean );
+        auto solved = fluidDetail::solveIntervalPressure( rhs, pressureOperator, seed, warmStart,
+            dt, relativeSquaredTolerance, closingRows );
         auto& [p, ap, initial, seedSquared, trueSquared, unprojectedSquared, iterations] = solved;
-        // The fixed operator omits B M^-1 B^T, but the final pressure
-        // traction still needs B^T p in the original accumulation order.
-        if( skipFixedBodyProducts ) transpose( p );
         if( closingVolumeRelativeTolerance > 0.0 )
             std::printf( "%s R4am closing rows %zu relative tolerance %.9g PCG %d\n",
                 key.c_str(), closingRows.size(), closingVolumeRelativeTolerance, iterations );
@@ -1963,7 +1947,7 @@ struct fluidStateTraceProbe2
         }
         // Volume residual must agree with the independently evaluated,
         // unprojected matrix residual. Recompute it after ap was projected.
-        multiply( p, ap );
+        pressureOperator.multiply( p, ap );
         double identityError = 0.0, rawL1 = 0.0, rawSum = 0.0, correctedL1 = 0.0;
         double correctedMax = 0.0, velocityL1 = 0.0, fluxL1 = 0.0;
         for( std::size_t i = 0; i < n; ++i )
@@ -2042,7 +2026,7 @@ struct fluidStateTraceProbe2
         {
             defectState state;
             state.residual.resize( n );
-            transpose( pressure );
+            pressureOperator.transpose( pressure );
             std::vector<fluidShapeObstacle2> endpoint( finish.begin(), finish.end() );
             for( std::size_t j = 0; j < owners; ++j )
             {
@@ -2095,7 +2079,7 @@ struct fluidStateTraceProbe2
                 state.opened += before.cellFluidFraction_[i] == 0.0f && fraction > 0.0;
             }
             const auto raw = state.residual;
-            zeroMean( state.residual );
+            pressureOperator.project( state.residual );
             for( std::size_t i = 0; i < n; ++i )
             {
                 state.compatibilityL1 += std::abs( raw[i] - state.residual[i] );
@@ -2112,7 +2096,7 @@ struct fluidStateTraceProbe2
         {
             std::vector<double> b( n ), residual( n ), pre( n ), direction( n ), product( n );
             for( std::size_t i = 0; i < n; ++i ) b[i] = -error[i] / ( dt * dt );
-            zeroMean( b );
+            pressureOperator.project( b );
             residual = b;
             const double initialSquared = dot( b, b );
             const double limit = std::max( 1.0e-24, initialSquared * 1.0e-16 );
@@ -2120,7 +2104,7 @@ struct fluidStateTraceProbe2
             {
                 for( std::size_t i = 0; i < n; ++i )
                     pre[i] = diagonal[i] > 0.0 ? residual[i] / diagonal[i] : 0.0;
-                zeroMean( pre );
+                pressureOperator.project( pre );
             };
             correction.assign( n, 0.0 );
             applyPre();
@@ -2128,7 +2112,7 @@ struct fluidStateTraceProbe2
             double rz = dot( residual, pre ), norm = initialSquared;
             for( steps = 0; steps < 2000 && norm > limit; )
             {
-                multiply( direction, product ); zeroMean( product );
+                pressureOperator.multiply( direction, product ); pressureOperator.project( product );
                 const double denominator = dot( direction, product );
                 if( !std::isfinite( denominator ) || denominator <= 0.0 ||
                     !std::isfinite( rz ) || rz <= 0.0 )
@@ -2148,8 +2132,8 @@ struct fluidStateTraceProbe2
                 for( std::size_t i = 0; i < n; ++i ) direction[i] = pre[i] + beta * direction[i];
                 rz = next;
             }
-            zeroMean( correction );
-            multiply( correction, product ); zeroMean( product );
+            pressureOperator.project( correction );
+            pressureOperator.multiply( correction, product ); pressureOperator.project( product );
             double actual = 0.0;
             for( std::size_t i = 0; i < n; ++i )
             {
@@ -2185,7 +2169,7 @@ struct fluidStateTraceProbe2
                     ++trials;
                     auto trialPressure = correctedPressure;
                     for( std::size_t i = 0; i < n; ++i ) trialPressure[i] += alpha * correction[i];
-                    zeroMean( trialPressure );
+                    pressureOperator.project( trialPressure );
                     auto trial = evaluateDefect( trialPressure );
                     ++defectEvaluations;
                     if( trial.analytic && trial.unsupported == 0.0 &&
@@ -2226,7 +2210,7 @@ struct fluidStateTraceProbe2
             throw std::runtime_error( defectKey + " accepted geometric defect increased" );
         // evaluateDefect/PCG may leave force scratch from a rejected trial.
         // Recompute the accepted pressure's feedback before World replay.
-        transpose( correctedPressure );
+        pressureOperator.transpose( correctedPressure );
         if( !continuation )
             captureWorldPressureResponse( before, baselineFeedback, force, trace,
                 "worldPressureResponse." + handoffKey );
@@ -2980,23 +2964,24 @@ struct fluidStateTraceProbe2
         std::puts( "R4bi field interval commit regressions passed" );
 
         // Exact two-cell Neumann Laplacian: p = (+0.5, -0.5).
-        const auto multiply = []( const std::vector<double>& p, std::vector<double>& out )
-        {
-            out[0] = p[0] - p[1]; out[1] = -out[0];
-        };
-        const auto gauge = []( std::vector<double>& p )
-        {
-            const double mean = ( p[0] + p[1] ) / 2.0;
-            p[0] -= mean; p[1] -= mean;
-        };
-        const std::vector<double> pressureRhs{ 1.0, -1.0 }, pressureDiagonal{ 1.0, 1.0 };
-        const std::vector<int> parent{ 0, 0 };
+        fluidDetail::intervalPressureGraph exactGraph;
+        exactGraph.edges = {{ 0, 1, 1.0, 0.0, true, 1 }};
+        exactGraph.diagonal = { 1.0, 1.0 };
+        exactGraph.parent = { 0, 0 }; exactGraph.count = { 2, 0 };
+        std::vector<double> exactSums( 2 );
+        const std::vector<fluidDetail::intervalPressureResponse> exactCoefficients{
+            { 1.0, 2.0, 3.0 }, { -1.0, -2.0, -3.0 } };
+        const std::vector<fluidDetail::intervalPressureBody> exactBodies{{ 0.0, 0.0 }};
+        std::vector<fluidDetail::intervalPressureResponse> exactForce( 1 );
+        const fluidDetail::intervalPressureOperator exactOperator( exactGraph, exactCoefficients,
+            exactBodies, exactForce, exactSums, 0.0, true );
+        const std::vector<double> pressureRhs{ 1.0, -1.0 };
         const std::vector<std::pair<std::size_t, double>> closingRows{{ 0, 0.0 }};
-        const auto cold = fluidDetail::solveIntervalPressure( pressureRhs, pressureDiagonal,
-            parent, {}, false, 1.0, 1.0e-16, closingRows, multiply, gauge );
+        const auto cold = fluidDetail::solveIntervalPressure( pressureRhs, exactOperator,
+            {}, false, 1.0, 1.0e-16, closingRows );
         const std::vector<float> pressureSeed{ 1.5f, 0.5f };
-        const auto warm = fluidDetail::solveIntervalPressure( pressureRhs, pressureDiagonal,
-            parent, pressureSeed, true, 1.0, 1.0e-16, closingRows, multiply, gauge );
+        const auto warm = fluidDetail::solveIntervalPressure( pressureRhs, exactOperator,
+            pressureSeed, true, 1.0, 1.0e-16, closingRows );
         if( cold.pressure != std::vector<double>{ 0.5, -0.5 } ||
             cold.projectedProduct != pressureRhs || cold.iterations != 1 ||
             warm.pressure != cold.pressure || warm.iterations != 0 ||
@@ -3004,16 +2989,32 @@ struct fluidStateTraceProbe2
             cold.unprojectedSquared != 0.0 || warm.unprojectedSquared != 0.0 )
             throw std::runtime_error( "R4bj projected pressure regression" );
         bool breakdownRejected = false;
-        const auto zeroOperator = []( const std::vector<double>&, std::vector<double>& out )
-        { std::fill( out.begin(), out.end(), 0.0 ); };
+        auto brokenGraph = exactGraph;
+        brokenGraph.edges.clear();
+        const fluidDetail::intervalPressureOperator zeroOperator( brokenGraph, {}, {}, {}, exactSums, 0.0, true );
         try
         {
-            (void)fluidDetail::solveIntervalPressure( pressureRhs, pressureDiagonal,
-                parent, {}, false, 1.0, 1.0e-16, {}, zeroOperator, gauge );
+            (void)fluidDetail::solveIntervalPressure( pressureRhs, zeroOperator,
+                {}, false, 1.0, 1.0e-16, {} );
         }
         catch( const std::runtime_error& ) { breakdownRejected = true; }
         if( !breakdownRejected ) throw std::runtime_error( "R4bj invalid operator accepted" );
-        std::puts( "R4bj projected pressure regressions passed" );
+        if( exactForce[0].fx != 1.0 || exactForce[0].fy != 2.0 || exactForce[0].torque != 3.0 )
+            throw std::runtime_error( "R4bo fixed geometry final traction regression" );
+        auto coupledGraph = exactGraph;
+        const std::vector<fluidDetail::intervalPressureResponse> coupledCoefficients{
+            { 1.0, 0.0, 0.0 }, { -1.0, 0.0, 0.0 } };
+        const std::vector<fluidDetail::intervalPressureBody> coupledBodies{{ 1.0, 0.0 }};
+        const fluidDetail::intervalPressureOperator coupledOperator( coupledGraph, coupledCoefficients,
+            coupledBodies, exactForce, exactSums, 1.0, false );
+        coupledOperator.addDiagonal( coupledGraph.diagonal );
+        const auto coupled = fluidDetail::solveIntervalPressure( pressureRhs, coupledOperator,
+            {}, false, 1.0, 1.0e-16, closingRows );
+        if( coupled.pressure[0] != 0.25 || coupled.pressure[1] != -0.25 ||
+            coupled.projectedProduct != pressureRhs || coupled.iterations != 1 ||
+            exactForce[0].fx != 0.5 || exactForce[0].fy != 0.0 || exactForce[0].torque != 0.0 )
+            throw std::runtime_error( "R4bo coupled operator regression" );
+        std::puts( "R4bj/R4bo projected pressure regressions passed" );
 
         // Disconnected components, a singleton and an inactive cell.
         const std::vector<int> graphParent{ 0, 0, 2, 2, 4, -1 };
