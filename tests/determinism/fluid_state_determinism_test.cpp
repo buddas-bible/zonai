@@ -2951,6 +2951,172 @@ struct fluidStateTraceProbe2
         }
     }
 
+    // R4ap: signed shared-face transport, separate from pressure and MAC.
+    // Repair only small closing-cell deficits using existing outward
+    // transfers to cells with positive endpoint volume. No partial result
+    // escapes when the deterministic greedy repair cannot satisfy its gates.
+    struct transportRepairFace
+    {
+        int first, second;
+        double amount;
+    };
+    struct transportRepairResult
+    {
+        std::vector<transportRepairFace> faces;
+        std::vector<double> ledger;
+        int repaired = 0, changedFaces = 0;
+        double reduction = 0.0, conservationError = 0.0;
+    };
+    static std::vector<double> rebuildTransportLedger( const std::vector<double>& start,
+        const std::vector<transportRepairFace>& faces )
+    {
+        auto ledger = start;
+        for( const auto& face : faces )
+        {
+            ledger[face.first] -= face.amount;
+            ledger[face.second] += face.amount;
+        }
+        return ledger;
+    }
+    static std::optional<transportRepairResult> repairClosingTransport(
+        const std::vector<double>& start, const std::vector<double>& endpoint,
+        const std::vector<transportRepairFace>& faces )
+    {
+        const std::size_t n = start.size();
+        if( endpoint.size() != n ) return std::nullopt;
+        std::vector<std::vector<std::size_t>> incident( n );
+        for( std::size_t i = 0; i < n; ++i )
+            if( !std::isfinite( start[i] ) || !std::isfinite( endpoint[i] ) ||
+                start[i] < 0.0 || endpoint[i] < 0.0 ) return std::nullopt;
+        for( std::size_t f = 0; f < faces.size(); ++f )
+        {
+            const auto& edge = faces[f];
+            if( edge.first < 0 || edge.second < 0 || edge.first == edge.second ||
+                static_cast<std::size_t>( edge.first ) >= n ||
+                static_cast<std::size_t>( edge.second ) >= n ||
+                !std::isfinite( edge.amount ) ) return std::nullopt;
+            incident[edge.first].push_back( f ); incident[edge.second].push_back( f );
+        }
+        transportRepairResult result;
+        result.faces = faces;
+        result.ledger = rebuildTransportLedger( start, faces );
+        const auto baseline = result.ledger;
+        constexpr double relativeDeficitLimit = 1.0e-6; // experimental, not a production tolerance
+        constexpr double epsilon = std::numeric_limits<double>::epsilon();
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            if( !std::isfinite( result.ledger[i] ) ) return std::nullopt;
+            if( result.ledger[i] >= 0.0 ) continue;
+            if( endpoint[i] != 0.0 || start[i] <= 0.0 ||
+                -result.ledger[i] > relativeDeficitLimit * start[i] ) return std::nullopt;
+            const double guard = 16.0 * epsilon * start[i];
+            const double need = -result.ledger[i] + guard;
+            double remaining = need;
+            // Stable input-face order, no hash traversal or tie dependence.
+            for( std::size_t f : incident[i] )
+            {
+                auto& edge = result.faces[f];
+                const bool fromFirst = edge.first == static_cast<int>( i );
+                const int neighbor = fromFirst ? edge.second : edge.first;
+                const double outward = fromFirst ? edge.amount : -edge.amount;
+                if( outward <= 0.0 || endpoint[neighbor] <= 0.0 ) continue;
+                const double reserve = 16.0 * epsilon * std::max( start[neighbor],
+                    std::abs( result.ledger[neighbor] ) );
+                const double capacity = std::min( outward,
+                    std::max( 0.0, result.ledger[neighbor] - reserve ) );
+                const double requested = std::min( remaining, capacity );
+                if( requested <= 0.0 ) continue;
+                const double revised = outward - requested;
+                const double actual = outward - revised;
+                if( actual <= 0.0 ) continue;
+                edge.amount = fromFirst ? revised : -revised;
+                result.ledger[neighbor] -= actual;
+                remaining -= actual;
+                result.reduction += actual;
+                ++result.changedFaces;
+                if( remaining <= 0.0 ) break;
+            }
+            if( remaining > guard * 0.5 ) return std::nullopt;
+            result.ledger = rebuildTransportLedger( start, result.faces );
+            if( result.ledger[i] < 0.0 || result.ledger[i] > 2.0 * guard ) return std::nullopt;
+            ++result.repaired;
+        }
+        double sumDelta = 0.0, scale = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            if( !std::isfinite( result.ledger[i] ) || result.ledger[i] < 0.0 ) return std::nullopt;
+            sumDelta += result.ledger[i] - baseline[i];
+            scale += std::abs( baseline[i] ) + std::abs( result.ledger[i] );
+        }
+        result.conservationError = std::abs( sumDelta );
+        if( !std::isfinite( scale ) || result.conservationError > 32.0 * epsilon * scale )
+            return std::nullopt;
+        return result;
+    }
+    static void checkClosingTransportRepair()
+    {
+        constexpr double small = 0x1p-24;
+        const std::vector<double> start{ 1.0, 1.0, 1.0 };
+        const std::vector<double> endpoint{ 0.0, 0.0, 3.0 };
+        const std::vector<transportRepairFace> shared{{ 0, 2, 1.0 + small },
+            { 2, 1, -( 1.0 + small ) }};
+        const auto result = repairClosingTransport( start, endpoint, shared );
+        if( !result || result->repaired != 2 || result->changedFaces != 2 )
+            throw std::runtime_error( "R4ap multi-closing shared recipient failed" );
+        // Force a deficit to be repaired over two outgoing faces by limiting
+        // one recipient's available ledger (not merely its transfer size).
+        const std::vector<double> splitStart{ 1.0, 0.0, 0.0, 1.0 };
+        const std::vector<double> splitEnd{ 0.0, 1.0, 1.0, 1.0 };
+        const std::vector<transportRepairFace> split{{ 0, 1, 0.5 }, { 0, 2, 0.5 + small },
+            { 1, 3, 0.5 - small * 0.5 }};
+        const auto splitResult = repairClosingTransport( splitStart, splitEnd, split );
+        if( !splitResult || splitResult->repaired != 1 || splitResult->changedFaces != 2 )
+            throw std::runtime_error( "R4ap split capacity failed" );
+        if( repairClosingTransport( start, { 0.0, 0.0, 0.0 }, shared ) ||
+            repairClosingTransport( start, { 1.0, 0.0, 3.0 }, shared ) ||
+            repairClosingTransport( start, endpoint, {{ 0, 2, 1.01 }} ) )
+            throw std::runtime_error( "R4ap unsafe repair accepted" );
+        const auto clean = repairClosingTransport( start, endpoint, {{ 0, 2, 1.0 }, { 1, 2, 1.0 }} );
+        if( !clean || clean->repaired != 0 || clean->changedFaces != 0 )
+            throw std::runtime_error( "R4ap clean transport changed" );
+        std::puts( "R4ap synthetic multiple/split/no-capacity/nonclosing/large/clean cases passed" );
+    }
+    static void auditClosingTransportRepair( const fluidField2& field,
+        const std::vector<float>& startFraction, const continuationPressure& candidate,
+        float dt, int index )
+    {
+        const double h = field.cellSize_, area = h * h;
+        std::vector<double> start( startFraction.size() ), endpoint( start.size() );
+        for( std::size_t i = 0; i < start.size(); ++i )
+        {
+            start[i] = area * startFraction[i];
+            endpoint[i] = area * field.cellFluidFraction_[i];
+        }
+        std::vector<transportRepairFace> faces;
+        const auto collect = [&]( bool isU, int x, int y )
+        {
+            const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
+            const double aperture = ( isU ? candidate.meanU : candidate.meanV )[f];
+            if( aperture <= 0.0 ) return;
+            const int a = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+            const int b = field.cellIndex( x, y );
+            faces.push_back( { a, b, static_cast<double>( dt ) * h * aperture *
+                ( isU ? candidate.intervalU : candidate.intervalV )[f] } );
+        };
+        for( int y = 0; y < field.height_; ++y )
+            for( int x = 1; x < field.width_; ++x ) collect( true, x, y );
+        for( int y = 1; y < field.height_; ++y )
+            for( int x = 0; x < field.width_; ++x ) collect( false, x, y );
+        if( rebuildTransportLedger( start, faces ) != candidate.fluxVolume )
+            throw std::runtime_error( "R4ap baseline transport ledger differs" );
+        const auto result = repairClosingTransport( start, endpoint, faces );
+        if( !result ) throw std::runtime_error( "R4ap unsupported closing transport repair" );
+        if( index == 64 && result->repaired != 1 )
+            throw std::runtime_error( "R4ap historical deficit not repaired" );
+        std::printf( "R4ap interval%d repaired %d changedFaces %d reduction %.17g conservationError %.17g\n",
+            index, result->repaired, result->changedFaces, result->reduction, result->conservationError );
+    }
+
     // R4k: independent forward pressure trial at a sampled R4j start.
     // Freeze the incoming MAC trial velocity: no forward advection or
     // persistent candidate commit is implied by this geometry-only test.
@@ -3080,6 +3246,8 @@ struct fluidStateTraceProbe2
                 timing, optimized ? 1.0e-10 : 1.0e-16, optimized, {}, true, true, optimized );
             const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
+            if( optimized && !timing )
+                auditClosingTransportRepair( forward, startFraction, candidate, dt, index );
             // R4al: isolate the negative modeled volume on the exact
             // accepted optimized input. Probe strict solves without
             // committing either alternative or changing trace coverage.
@@ -5922,6 +6090,7 @@ int main( int argc, char** argv )
         }
 
         zonai::fluidStateTraceProbe2::checkCertifiedCellCoverage();
+        zonai::fluidStateTraceProbe2::checkClosingTransportRepair();
 
         std::string trace =
             runScene( "sampledCutCell", false ) + runScene( "analyticCircle", true );
