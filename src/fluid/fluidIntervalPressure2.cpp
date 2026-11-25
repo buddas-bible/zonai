@@ -117,6 +117,57 @@ void multiplyIntervalPressureGraph( std::span<const intervalPressureEdge> edges,
     }
 }
 
+intervalPressureRhsResult buildIntervalPressureRhs(
+    const intervalPressureGraph& graph, std::span<const float> endpointFraction,
+    double scale, bool volumeWeightedCompatibility, std::span<double> rhs, std::span<double> sums )
+{
+    const std::size_t n = graph.rawDivergence.size();
+    const auto& parent = graph.parent;
+    const auto& count = graph.count;
+    const auto& rawDivergence = graph.rawDivergence;
+    if( rhs.size() != n || sums.size() != n || endpointFraction.size() != n ||
+        parent.size() != n || count.size() != n || !std::isfinite( scale ) || scale <= 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid RHS input" );
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( parent[i] < -1 || ( parent[i] >= 0 &&
+            ( static_cast<std::size_t>( parent[i] ) >= n || count[parent[i]] <= 0 ) ) ||
+            !std::isfinite( rawDivergence[i] ) || !std::isfinite( endpointFraction[i] ) ||
+            endpointFraction[i] < 0.0f )
+            throw std::invalid_argument( "interval pressure: invalid RHS row" );
+        rhs[i] = -scale * rawDivergence[i];
+        if( !std::isfinite( rhs[i] ) )
+            throw std::invalid_argument( "interval pressure: nonfinite RHS" );
+    }
+    if( volumeWeightedCompatibility )
+    {
+        // Compatibility is an RHS correction, not the pressure gauge.
+        std::vector<double> componentRhs( n ), componentVolume( n );
+        for( std::size_t i = 0; i < n; ++i )
+            if( parent[i] >= 0 )
+            {
+                componentRhs[parent[i]] += rhs[i];
+                componentVolume[parent[i]] += endpointFraction[i];
+            }
+        for( std::size_t i = 0; i < n; ++i )
+            if( parent[i] >= 0 )
+            {
+                const int c = parent[i];
+                if( componentVolume[c] > 0.0 )
+                    rhs[i] -= componentRhs[c] *
+                        ( static_cast<double>( endpointFraction[i] ) / componentVolume[c] );
+                else if( componentRhs[c] != 0.0 )
+                    return { 0.0, c, componentRhs[c], componentVolume[c] };
+            }
+    }
+    // Remove remaining roundoff (or apply the original uniform projection).
+    projectIntervalPressureGauge( rhs, parent, count, sums );
+    double compatibilityL1 = 0.0;
+    for( std::size_t i = 0; i < n; ++i )
+        compatibilityL1 += std::abs( rhs[i] + scale * rawDivergence[i] );
+    return { compatibilityL1 };
+}
+
 void transposeIntervalPressureBodies( std::span<const intervalPressureResponse> coefficients,
     std::span<const double> pressure, std::span<intervalPressureResponse> force )
 {
