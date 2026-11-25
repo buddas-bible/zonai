@@ -50,6 +50,21 @@ void projectIntervalPressureGauge( std::span<double> values, std::span<const int
 void multiplyIntervalPressureGraph( std::span<const intervalPressureEdge> edges,
     std::span<const double> pressure, std::span<double> out );
 
+struct intervalPressureRhsResult
+{
+    double compatibilityL1 = 0.0;
+    int failedComponent = -1;
+    double componentRhs = 0.0, componentVolume = 0.0;
+};
+
+// Build the RHS and remove component incompatibility. A component with
+// nonzero net RHS and no endpoint capacity is rejected in weighted mode.
+// On that failure rhs is diagnostic-only and must not be passed to PCG.
+// Graph topology must come from buildIntervalPressureGraph; buffers must not alias.
+[[nodiscard]] intervalPressureRhsResult buildIntervalPressureRhs(
+    const intervalPressureGraph& graph, std::span<const float> endpointFraction,
+    double scale, bool volumeWeightedCompatibility, std::span<double> rhs, std::span<double> sums );
+
 struct intervalPressureResponse
 {
     double fx = 0.0;
