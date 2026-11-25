@@ -1,5 +1,6 @@
 #include "fluid/fluidField2.h"
 #include "fluid/fluidTransport2.h"
+#include "fluid/fluidIntervalPressure2.h"
 
 #include "collision/distance2.h"
 #include "math/deterministicMath.h"
@@ -2139,6 +2140,66 @@ bool fluidField2::rebuildIntervalPressureGeometry( std::span<const fluidShapeObs
     updateObstacles( obstacles );
     updateCutCellGeometry( obstacles );
     return cutCellTransition_.usedDisjointAnalyticGeometry;
+}
+
+void fluidField2::integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
+    std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
+    const fluidDetail::intervalPressureQuadrature& quadrature,
+    fluidDetail::intervalPressureGeometryIntegral& integral ) const
+{
+    const auto& start = previousObstacles_;
+    const auto& finish = frozenPressureObstacles_;
+    const std::size_t owners = finish.size(), n = cellFluidFraction_.size();
+    if( &geometry == this || &panelGeometry == this || &geometry == &panelGeometry ||
+        geometry.width_ != width_ || geometry.height_ != height_ ||
+        panelGeometry.width_ != width_ || panelGeometry.height_ != height_ ||
+        start.size() != owners || poses.size() != owners || motion.size() != owners ||
+        previousCellFluidFraction_.size() != n || !volumeSourceValid_ ||
+        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f ||
+        quadrature.panels.empty() || !std::isfinite( quadrature.weightSum ) || quadrature.weightSum <= 0.0 ||
+        ( owners != 0 && n > std::numeric_limits<std::size_t>::max() / owners ) )
+        throw std::invalid_argument( "interval pressure: invalid panel integration input" );
+
+    auto& [meanU, meanV, fraction, coefficients, transportPanels, weightSum] = integral;
+    // The caller can pre-size these buffers before entering the timed phase.
+    meanU.assign( u_.size(), 0.0 ); meanV.assign( v_.size(), 0.0 );
+    fraction.assign( n, 0.0 ); coefficients.assign( n * owners, fluidDetail::intervalPressureResponse{} );
+    transportPanels.clear();
+    weightSum = 0.0;
+    const auto setPose = [&]( fluidField2& target, float alpha )
+    {
+        fluidDetail::sampleIntervalPressurePoses( start, finish, motion, frozenPressureTimeStep_, alpha, poses );
+        if( !target.rebuildIntervalPressureGeometry( poses ) )
+            throw std::runtime_error( "interval pressure: nonanalytic quadrature geometry" );
+    };
+    for( const auto& sample : quadrature.panels )
+    {
+        const double weight = sample.weight, lo = sample.lo;
+        fluidDetail::transportPanel panel{ weight, {}, std::vector<float>( u_.size() ),
+            std::vector<float>( v_.size() ) };
+        if( lo == 0.0 ) panel.startFraction = previousCellFluidFraction_;
+        else
+        {
+            setPose( panelGeometry, static_cast<float>( lo ) );
+            panel.startFraction = panelGeometry.cellFluidFraction_;
+        }
+        setPose( geometry, sample.alpha );
+        fluidDetail::accumulateIntervalPressureGeometry( geometry.width_, geometry.height_,
+            { geometry.cellFluidFraction_, geometry.uOpenFraction_, geometry.vOpenFraction_ }, weight,
+            fraction, meanU, meanV, panel.uOpen, panel.vOpen );
+        transportPanels.push_back( std::move( panel ) );
+        // Same geometry and same quadrature weight for L and B.
+        std::fill( geometry.divergence_.begin(), geometry.divergence_.end(), 0.0f );
+        if( !geometry.solveCoupledPressure( frozenPressureTimeStep_, 200, poses, true ) )
+            throw std::runtime_error( "interval pressure: zero-RHS boundary assembly failed" );
+        for( const auto& f : geometry.coupledPressureScratch_.faces )
+        {
+            auto& c = coefficients[static_cast<std::size_t>( f.cell ) * owners + f.owner];
+            c.fx += weight * f.fx; c.fy += weight * f.fy; c.torque += weight * f.torque;
+        }
+    }
+    weightSum = quadrature.weightSum;
+    fluidDetail::normalizeIntervalPressureQuadrature( weightSum, meanU, meanV, fraction, coefficients );
 }
 
 void fluidField2::remapExposedFaces()
