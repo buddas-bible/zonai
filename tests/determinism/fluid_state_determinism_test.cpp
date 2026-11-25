@@ -1808,7 +1808,7 @@ struct fluidStateTraceProbe2
         for( const auto& e : edges )
         {
             const double difference = p[e.first] - p[e.second];
-            const double velocity = e.velocity + dt / h * difference;
+            const double velocity = fluidDetail::intervalFaceVelocity( e, p, h, dt );
             peak = std::max( peak, std::abs( velocity ) );
             const int x = e.index % ( before.width_ + ( e.isU ? 1 : 0 ) );
             const int y = e.index / ( before.width_ + ( e.isU ? 1 : 0 ) );
@@ -1908,8 +1908,8 @@ struct fluidStateTraceProbe2
         };
         for( const auto& e : edges )
         {
-            const double velocity = e.velocity + dt / h * ( p[e.first] - p[e.second] );
-            const double transfer = dt * h * e.a * velocity;
+            const double velocity = fluidDetail::intervalFaceVelocity( e, p, h, dt );
+            const double transfer = fluidDetail::intervalFaceTransfer( e, velocity, h, dt );
             ( e.isU ? transport.uTransfer : transport.vTransfer )[e.index] = transfer;
             ( e.isU ? intervalUVelocity : intervalVVelocity )[e.index] = velocity;
             intervalTransferL1 += std::abs( transfer );
@@ -2057,8 +2057,8 @@ struct fluidStateTraceProbe2
                 fluxVolume[i] = area * before.previousCellFluidFraction_[i];
             for( const auto& e : edges )
             {
-                const double velocity = e.velocity + dt / h * ( pressure[e.first] - pressure[e.second] );
-                const double transfer = dt * h * e.a * velocity;
+                const double velocity = fluidDetail::intervalFaceVelocity( e, pressure, h, dt );
+                const double transfer = fluidDetail::intervalFaceTransfer( e, velocity, h, dt );
                 fluxVolume[e.first] -= transfer;
                 fluxVolume[e.second] += transfer;
                 state.peak = std::max( state.peak, std::abs( velocity ) );
@@ -2216,8 +2216,14 @@ struct fluidStateTraceProbe2
                 "worldPressureResponse." + handoffKey );
         else
         {
-            continuation->u = before.u_;
-            continuation->v = before.v_;
+            auto reconstructed = fluidDetail::reconstructIntervalPressure( before.width_, before.height_, h, dt,
+                graph, correctedPressure, before.previousCellFluidFraction_, before.cellFluidFraction_,
+                { meanU, before.u_, before.uOpenFraction_ }, { meanV, before.v_, before.vOpenFraction_ },
+                captureEndpoint );
+            continuation->u = std::move( reconstructed.u );
+            continuation->v = std::move( reconstructed.v );
+            continuation->fluxVolume = std::move( reconstructed.fluxVolume );
+            continuation->uncoveredEndpointFaces = reconstructed.uncoveredEndpointFaces;
             continuation->pressure.resize( n );
             for( std::size_t i = 0; i < n; ++i )
                 continuation->pressure[i] = static_cast<float>( correctedPressure[i] );
@@ -2227,50 +2233,18 @@ struct fluidStateTraceProbe2
                 continuation->feedback[i].force = { static_cast<float>( force[i].fx ), static_cast<float>( force[i].fy ) };
                 continuation->feedback[i].torque = static_cast<float>( force[i].torque );
             }
-            for( const auto& e : edges )
-            {
-                const double velocity = e.velocity + dt / h *
-                    ( correctedPressure[e.first] - correctedPressure[e.second] );
-                const int stride = before.width_ + ( e.isU ? 1 : 0 );
-                const int x = e.index % stride, y = e.index / stride;
-                if( ( e.isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y ) ) > 0.0f )
-                    ( e.isU ? continuation->u : continuation->v )[e.index] = static_cast<float>( velocity );
-            }
-            // If an endpoint-open face has no interval support, retain
-            // its pre-pressure value and disclose this explicit fallback.
-            for( int y = 0; y < before.height_; ++y )
-                for( int x = 1; x < before.width_; ++x )
-                    continuation->uncoveredEndpointFaces += before.cutCellUOpen( x, y ) > 0.0f &&
-                        meanU[before.uIndex( x, y )] <= 0.0;
-            for( int y = 1; y < before.height_; ++y )
-                for( int x = 0; x < before.width_; ++x )
-                    continuation->uncoveredEndpointFaces += before.cutCellVOpen( x, y ) > 0.0f &&
-                        meanV[before.vIndex( x, y )] <= 0.0;
-            continuation->fluxVolume.resize( n );
             continuation->component = parent;
             if( captureEndpoint )
             {
                 continuation->meanU = meanU; continuation->meanV = meanV;
-                continuation->intervalU.resize( meanU.size() );
-                continuation->intervalV.resize( meanV.size() );
+                continuation->intervalU = std::move( reconstructed.intervalU );
+                continuation->intervalV = std::move( reconstructed.intervalV );
                 if( correctionBudget == 0 )
                 {
                     continuation->bodyVolume = bodyVolumeAudit;
                     continuation->compatibilityVolume = removedVolumeAudit;
                     continuation->linearVolumeResidual = correctedVolume;
                 }
-            }
-            for( std::size_t i = 0; i < n; ++i )
-                continuation->fluxVolume[i] = area * before.previousCellFluidFraction_[i];
-            for( const auto& e : edges )
-            {
-                const double velocity = e.velocity + dt / h *
-                    ( correctedPressure[e.first] - correctedPressure[e.second] );
-                const double transfer = dt * h * e.a * velocity;
-                continuation->fluxVolume[e.first] -= transfer;
-                continuation->fluxVolume[e.second] += transfer;
-                if( captureEndpoint )
-                    ( e.isU ? continuation->intervalU : continuation->intervalV )[e.index] = velocity;
             }
             continuation->trueResidualSquared = trueSquared;
             continuation->initialResidualSquared = initial;
@@ -3142,6 +3116,49 @@ struct fluidStateTraceProbe2
         catch( const std::invalid_argument& ) { rhsExtentRejected = true; }
         if( !rhsExtentRejected ) throw std::runtime_error( "R4bn invalid RHS extent accepted" );
         std::puts( "R4bn interval pressure RHS regressions passed" );
+
+        // One mean-open face closes at the endpoint, another face is
+        // endpoint-open but has no interval support. Do not lose the first
+        // face's signed transfer or overwrite either frozen face velocity.
+        fluidDetail::intervalPressureGraph reconstructionGraph;
+        reconstructionGraph.parent = { 0, 0, 2 };
+        reconstructionGraph.edges = {{ 0, 1, 0.5, 2.0, true, 1 }};
+        const std::vector<double> reconstructionPressure{ 4.0, 0.0, 0.0 },
+            reconstructionMeanU{ 0.0, 0.5, 0.0, 0.0 }, reconstructionMeanV( 6 );
+        const std::vector<float> reconstructionPrevious{ 1.0f, 1.0f, 1.0f },
+            reconstructionU{ 9.0f, 2.0f, 7.0f, 9.0f }, reconstructionV( 6, 3.0f ),
+            reconstructionOpenU( 4, 1.0f ), reconstructionOpenV( 6, 1.0f );
+        std::vector<float> reconstructionEnd{ 0.0f, 1.0f, 1.0f };
+        const fluidDetail::intervalPressureFaceInput reconstructionFacesU{
+            reconstructionMeanU, reconstructionU, reconstructionOpenU },
+            reconstructionFacesV{ reconstructionMeanV, reconstructionV, reconstructionOpenV };
+        const auto closedReconstruction = fluidDetail::reconstructIntervalPressure( 3, 1, 2.0, 0.5,
+            reconstructionGraph, reconstructionPressure, reconstructionPrevious, reconstructionEnd,
+            reconstructionFacesU, reconstructionFacesV, true );
+        if( closedReconstruction.u != reconstructionU || closedReconstruction.v != reconstructionV ||
+            closedReconstruction.fluxVolume != std::vector<double>{ 2.5, 5.5, 4.0 } ||
+            closedReconstruction.intervalU != std::vector<double>{ 0.0, 3.0, 0.0, 0.0 } ||
+            closedReconstruction.intervalV != reconstructionMeanV || closedReconstruction.uncoveredEndpointFaces != 1 )
+            throw std::runtime_error( "R4bp closed endpoint reconstruction regression" );
+        reconstructionEnd[0] = 1.0f;
+        const auto openReconstruction = fluidDetail::reconstructIntervalPressure( 3, 1, 2.0, 0.5,
+            reconstructionGraph, reconstructionPressure, reconstructionPrevious, reconstructionEnd,
+            reconstructionFacesU, reconstructionFacesV, false );
+        if( openReconstruction.u != std::vector<float>{ 9.0f, 3.0f, 7.0f, 9.0f } ||
+            openReconstruction.v != reconstructionV || openReconstruction.fluxVolume != closedReconstruction.fluxVolume ||
+            !openReconstruction.intervalU.empty() || !openReconstruction.intervalV.empty() ||
+            openReconstruction.uncoveredEndpointFaces != 1 )
+            throw std::runtime_error( "R4bp supported endpoint reconstruction regression" );
+        bool reconstructionRejected = false;
+        try
+        {
+            (void)fluidDetail::reconstructIntervalPressure( 3, 1, 2.0, 0.5,
+                reconstructionGraph, {}, reconstructionPrevious, reconstructionEnd,
+                reconstructionFacesU, reconstructionFacesV, true );
+        }
+        catch( const std::invalid_argument& ) { reconstructionRejected = true; }
+        if( !reconstructionRejected ) throw std::runtime_error( "R4bp invalid reconstruction extent accepted" );
+        std::puts( "R4bp interval pressure reconstruction regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
