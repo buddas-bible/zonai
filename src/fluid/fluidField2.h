@@ -29,6 +29,7 @@ struct intervalPressureLinearState;
 struct intervalPressureOperator;
 struct intervalPressureDefect;
 struct intervalPressureDefectResult;
+struct intervalPressureCandidate;
 }
 
 
@@ -861,6 +862,12 @@ private:
     [[nodiscard]] fluidDetail::intervalPressureDefectResult correctIntervalPressureDefect(
         const fluidDetail::intervalPressureOperator& op, std::span<const double> pressure,
         std::span<const fluidObstacleForce2> baselineFeedback, int targetIndex, int correctionBudget ) const;
+    // All inputs must belong to the same frozen interval. linear.force
+    // must hold the final accepted traction restored by defect correction.
+    [[nodiscard]] fluidDetail::intervalPressureCandidate buildIntervalPressureCandidate(
+        const fluidDetail::intervalPressureGeometryIntegral& integral,
+        const fluidDetail::intervalPressureLinearState& linear,
+        const fluidDetail::intervalPressureDefectResult& defect, bool captureIntervalVelocity ) const;
     void remapExposedFaces();
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
