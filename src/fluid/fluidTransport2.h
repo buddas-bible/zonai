@@ -37,6 +37,19 @@ struct transportFaceSample
     double mean;
 };
 
+struct macTransportInput
+{
+    std::vector<transportRepairFace> faces;
+    std::vector<transportFaceSample> mapping;
+};
+
+// Build the shared interior face list and its aperture sample mapping in
+// canonical U-then-V row-major order. Exterior faces are excluded.
+[[nodiscard]] macTransportInput buildMacTransportInput( int width, int height,
+    double cellSize, double dt, const std::vector<double>& meanU,
+    const std::vector<double>& meanV, const std::vector<double>& intervalU,
+    const std::vector<double>& intervalV );
+
 // Map interval signed face amounts to a sampled time panel. Mapping must
 // match the interval face order. No normalization or aperture floor.
 [[nodiscard]] std::vector<double> buildTransportPanelAmounts(
