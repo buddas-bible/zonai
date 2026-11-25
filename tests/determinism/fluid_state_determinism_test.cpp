@@ -1736,7 +1736,30 @@ struct fluidStateTraceProbe2
                         rhs[i] -= componentRhs[c] *
                             ( static_cast<double>( before.cellFluidFraction_[i] ) / componentVolume[c] );
                     else if( componentRhs[c] != 0.0 )
+                    {
+                        // A disappearing interval component has no endpoint
+                        // recipient. Preserve the failure and expose its geometry
+                        // and source/flux balance before choosing a remedy.
+                        std::fprintf( stderr,
+                            "%s endpointCapacity root %d cells %d rhs %.17g endpointFraction %.17g dt %.17g h %.17g\n",
+                            key.c_str(), c, count[c], componentRhs[c], componentVolume[c], dt, h );
+                        for( std::size_t j = 0; j < n; ++j )
+                        {
+                            if( parent[j] != c ) continue;
+                            const int x = static_cast<int>( j ) % before.width_;
+                            const int y = static_cast<int>( j ) / before.width_;
+                            const double previous = before.previousCellFluidFraction_[j];
+                            const double current = before.cellFluidFraction_[j];
+                            const double source = ( current - previous ) / dt;
+                            std::fprintf( stderr,
+                                "%s endpointCapacity cell %zu x %d y %d previous %.17g current %.17g mean %.17g source %.17g fluxDivergence %.17g rhs %.17g meanOpen L/R/B/T %.17g %.17g %.17g %.17g\n",
+                                key.c_str(), j, x, y, previous, current, fraction[j], source,
+                                rawDivergence[j] - source, rhs[j],
+                                meanU[before.uIndex( x, y )], meanU[before.uIndex( x + 1, y )],
+                                meanV[before.vIndex( x, y )], meanV[before.vIndex( x, y + 1 )] );
+                        }
                         throw std::runtime_error( key + " component lacks endpoint compatibility capacity" );
+                    }
                 }
         }
         // Remove the remaining roundoff in the compatible RHS. For the
