@@ -32,6 +32,7 @@ namespace zonai
 struct fluidStateTraceProbe2
 {
     static inline bool benchmarkForward = false;
+    static inline bool benchmarkTracer = false;
     using benchmarkClock = std::chrono::steady_clock;
     struct forwardTiming
     {
@@ -3601,18 +3602,21 @@ struct fluidStateTraceProbe2
     // transfer when the donor bound holds; otherwise reuse the pressure
     // quadrature schedule with bounded throughflow. Reset modeled volume
     // to actual start geometry each interval, not scalar mass.
-    static void auditHybridTracer( const fluidField2& field,
+    struct hybridTracerResult
+    {
+        std::vector<double> mass, volume;
+        int panels, maxPasses, totalPasses;
+        double unserved, transferError;
+    };
+
+    static hybridTracerResult consumeHybridTracer( const fluidField2& field,
         const continuationPressure& candidate, const transportRepairResult& repair,
         const std::vector<double>& startVolume, const std::vector<double>& outgoing,
-        int adaptivePanels, const tracerPanelResult& adaptiveResult, persistentTracerAudit& history,
-        int index, std::string& trace )
+        int adaptivePanels, const std::vector<double>& seed )
     {
         const std::size_t n = startVolume.size();
         const double h = field.cellSize_, area = h * h;
-        if( history.intervals == 0 ) history.hybrid = history.repaired;
-        if( history.hybrid.size() != n )
-            throw std::runtime_error( "R4bb missing hybrid tracer history" );
-        auto mass = history.hybrid;
+        auto mass = seed;
         auto volume = startVolume, uniform = startVolume;
         int panels = 1, maxPasses = 1, totalPasses = 1;
         double unserved = 0.0, transferError = 0.0;
@@ -3624,8 +3628,6 @@ struct fluidStateTraceProbe2
                 throw std::runtime_error( "R4bb unsupported fast path" );
             mass = std::move( single.mass );
             volume = repair.ledger;
-            if( history.hybrid == history.adaptive && mass != adaptiveResult.mass )
-                throw std::runtime_error( "R4bb identical fast-path input differs" );
         }
         else
         {
@@ -3682,6 +3684,64 @@ struct fluidStateTraceProbe2
             }
             if( transferError > 1.0e-12 * std::max( transferL1, 1.0e-12 ) )
                 throw std::runtime_error( "R4bb sampled schedule differs from interval requests" );
+        }
+        return { std::move( mass ), std::move( volume ), panels, maxPasses, totalPasses,
+            unserved, transferError };
+    }
+
+    static void auditHybridTracer( const fluidField2& field,
+        const continuationPressure& candidate, const transportRepairResult& repair,
+        const std::vector<double>& startVolume, const std::vector<double>& outgoing,
+        int adaptivePanels, const tracerPanelResult& adaptiveResult, persistentTracerAudit& history,
+        int index, std::string& trace )
+    {
+        const std::size_t n = startVolume.size();
+        const double h = field.cellSize_, area = h * h;
+        if( history.intervals == 0 ) history.hybrid = history.repaired;
+        if( history.hybrid.size() != n )
+            throw std::runtime_error( "R4bb missing hybrid tracer history" );
+        auto computed = consumeHybridTracer( field, candidate, repair, startVolume, outgoing,
+            adaptivePanels, history.hybrid );
+        auto& [mass, volume, panels, maxPasses, totalPasses, unserved, transferError] = computed;
+        if( adaptivePanels == 1 && history.hybrid == history.adaptive && mass != adaptiveResult.mass )
+            throw std::runtime_error( "R4bb identical fast-path input differs" );
+
+        // R4bc: identical seed, face ledger and panel-selection decision.
+        // Time only the consumers, alternating order. No clock values in
+        // the deterministic trace, and no timed trial commits history.
+        if( benchmarkTracer )
+        {
+            const auto reference = consumeTracerPanels( history.hybrid, startVolume,
+                repair.ledger, outgoing, repair.faces, adaptivePanels );
+            for( int repeat = 0; repeat < 7; ++repeat )
+            {
+                double adaptiveMs = 0.0, hybridMs = 0.0;
+                const auto measureAdaptive = [&]()
+                {
+                    const auto begin = benchmarkClock::now();
+                    const auto trial = consumeTracerPanels( history.hybrid, startVolume,
+                        repair.ledger, outgoing, repair.faces, adaptivePanels );
+                    adaptiveMs = elapsedMs( begin, benchmarkClock::now() );
+                    if( trial.mass != reference.mass || trial.unserved != reference.unserved )
+                        throw std::runtime_error( "R4bc adaptive timing replay differs" );
+                };
+                const auto measureHybrid = [&]()
+                {
+                    const auto begin = benchmarkClock::now();
+                    const auto trial = consumeHybridTracer( field, candidate, repair, startVolume,
+                        outgoing, adaptivePanels, history.hybrid );
+                    hybridMs = elapsedMs( begin, benchmarkClock::now() );
+                    if( trial.mass != mass || trial.volume != volume || trial.panels != panels ||
+                        trial.maxPasses != maxPasses || trial.totalPasses != totalPasses ||
+                        trial.unserved != unserved || trial.transferError != transferError )
+                        throw std::runtime_error( "R4bc hybrid timing replay differs" );
+                };
+                if( repeat % 2 == 0 ) { measureAdaptive(); measureHybrid(); }
+                else { measureHybrid(); measureAdaptive(); }
+                std::printf( "R4bc timing interval=%d repeat=%d adaptive_panels=%d hybrid_panels=%d "
+                    "hybrid_passes=%d adaptive_ms=%.9f hybrid_ms=%.9f\n", index, repeat,
+                    adaptivePanels, panels, totalPasses, adaptiveMs, hybridMs );
+            }
         }
         double total = 0.0, peak = 0.0, trapped = 0.0, deltaL1 = 0.0, modelGap = 0.0;
         double totalVolume = 0.0, initialVolume = 0.0;
@@ -7066,6 +7126,13 @@ int main( int argc, char** argv )
 {
     try
     {
+        if( argc == 2 && std::string( argv[1] ) == "--benchmark-tracer" )
+        {
+            zonai::fluidStateTraceProbe2::benchmarkTracer = true;
+            const auto trace = runNearClosedFaceScene();
+            if( trace.empty() ) throw std::runtime_error( "R4bc missing fixture trace" );
+            return EXIT_SUCCESS;
+        }
         if( argc == 2 && std::string( argv[1] ) == "--benchmark-forward" )
         {
             zonai::fluidStateTraceProbe2::benchmarkForward = true;
@@ -7075,7 +7142,7 @@ int main( int argc, char** argv )
         }
         if( argc != 1 && ( argc != 3 || std::string( argv[1] ) != "--emit" ) )
         {
-            std::fprintf( stderr, "Usage: fluidStateDeterminismTests [--emit TRACE.tsv | --benchmark-forward]\n" );
+            std::fprintf( stderr, "Usage: fluidStateDeterminismTests [--emit TRACE.tsv | --benchmark-forward | --benchmark-tracer]\n" );
             return EXIT_FAILURE;
         }
 
