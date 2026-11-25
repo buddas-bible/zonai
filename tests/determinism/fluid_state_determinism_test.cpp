@@ -4295,6 +4295,62 @@ struct fluidStateTraceProbe2
                             integratedFeedback[j].torque != stagedFeedback[j].torque )
                             throw std::runtime_error( "R4cc integrated feedback differs" );
                     std::printf( "R4cc integrated interval%d matches staged reference\n", index );
+
+                    // Exercise the entire isolated endpoint path from the
+                    // same advected start, independently of prepared forward.
+                    fluidField2 source = input;
+                    source.tracerEnabled_ = true;
+                    source.tracerMass_.resize( startFraction.size() );
+                    for( std::size_t j = 0; j < startFraction.size(); ++j )
+                        source.tracerMass_[j] = area * startFraction[j] * ( 1.0 + ( j % 7 ) / 8.0 );
+                    const auto sourceMass = source.tracerMass_;
+                    const auto sourceHistory = source.previousCellFluidFraction_;
+                    const auto sourcePressure = source.pressure_;
+                    std::vector<fluidObstacleForce2> endpointFeedback( candidate.feedback.size() );
+                    const auto endpoint = source.solveIntervalPressureEndpoint( dt, start, predicted, options,
+                        laggedField.pressure_, laggedLoad, endpointFeedback );
+                    const auto unchangedSource = [&]()
+                    {
+                        return source.tracerMass_ == sourceMass && source.pressure_ == sourcePressure &&
+                            source.cellFluidFraction_ == startFraction &&
+                            source.previousCellFluidFraction_ == sourceHistory &&
+                            source.u_ == input.u_ && source.v_ == input.v_ &&
+                            source.uOpenFraction_ == input.uOpenFraction_ && source.vOpenFraction_ == input.vOpenFraction_;
+                    };
+                    if( !endpoint || !unchangedSource() ||
+                        endpoint->u_ != staged.u_ || endpoint->v_ != staged.v_ ||
+                        endpoint->pressure_ != staged.pressure_ || endpoint->tracerMass_ != staged.tracerMass_ ||
+                        endpoint->tracerStats_.substeps != staged.tracerStats_.substeps ||
+                        endpoint->cellFluidFraction_ != forward.cellFluidFraction_ ||
+                        endpoint->previousCellFluidFraction_ != startFraction ||
+                        endpoint->uOpenFraction_ != forward.uOpenFraction_ ||
+                        endpoint->vOpenFraction_ != forward.vOpenFraction_ )
+                        throw std::runtime_error( "R4ck isolated endpoint differs from staged reference" );
+                    const auto unchangedFeedback = [&]()
+                    {
+                        for( std::size_t j = 0; j < endpointFeedback.size(); ++j )
+                            if( endpointFeedback[j].force.x != stagedFeedback[j].force.x ||
+                                endpointFeedback[j].force.y != stagedFeedback[j].force.y ||
+                                endpointFeedback[j].torque != stagedFeedback[j].torque ) return false;
+                        return true;
+                    };
+                    auto coupledOptions = options;
+                    coupledOptions.linear.responseScale = 1.0;
+                    bool rejectedCoupling = false;
+                    try
+                    {
+                        (void)source.solveIntervalPressureEndpoint( dt, start, predicted, coupledOptions,
+                            laggedField.pressure_, laggedLoad, endpointFeedback );
+                    }
+                    catch( const std::invalid_argument& ) { rejectedCoupling = true; }
+                    if( !rejectedCoupling || !unchangedSource() || !unchangedFeedback() )
+                        throw std::runtime_error( "R4ck unsupported coupled endpoint changed state" );
+                    source.tracerEnabled_ = false;
+                    if( source.solveIntervalPressureEndpoint( dt, start, predicted, options,
+                            laggedField.pressure_, laggedLoad, endpointFeedback ) ||
+                        !unchangedSource() || !unchangedFeedback() )
+                        throw std::runtime_error( "R4ck disabled endpoint changed state" );
+                    std::printf( "R4ck isolated endpoint interval%d matches staged reference\n", index );
                     const double stagedProjectionMs = elapsedMs( pressureStart, pressureEnd );
                     const double stagedCommitMs = elapsedMs( stagedStart, stagedEnd );
                     const double integratedMs = elapsedMs( integratedStart, integratedEnd );
