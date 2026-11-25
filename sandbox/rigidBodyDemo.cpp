@@ -258,7 +258,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 const float fieldWidth = windField_->getWidth() * windField_->getCellSize();
                 const float sourceX = windField_->getOrigin().x + std::min( 2.5f, 0.25f * fieldWidth );
                 const vec2 source{ sourceX, 0.0f };
-                const vec2 velocityDelta{ windSourceStrength_ * windTimeStep, 0.5f * windSourceStrength_ * windTimeStep * std::sin( 1.7f * windTime_ ) };
+                const vec2 velocityDelta{ windSourceStrength_ * windTimeStep, 0.5f * windSourceStrength_ * windTimeStep * rot2::FromRadians( 1.7f * windTime_ ).s };
                 windField_->addVelocity( source, velocityDelta, 1.7f );
             }
             // fluidField2는 World나 Body를 소유하지 않음. 매 Step마다 실제 pose/속도를 전달함.
