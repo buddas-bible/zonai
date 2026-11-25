@@ -3122,6 +3122,38 @@ struct fluidStateTraceProbe2
         catch( const std::invalid_argument& ) { invalidMacRejected = true; }
         if( !invalidMacRejected ) throw std::runtime_error( "R4bh invalid MAC extent accepted" );
         std::puts( "R4bh canonical MAC transport regressions passed" );
+
+        // The private field entry must commit only the scalar state and
+        // its statistics. Rejected transport leaves even those unchanged.
+        fluidField2 trial( 2, 1, 1.0f );
+        trial.tracerEnabled_ = true;
+        trial.tracerMass_ = { 0.0, 0.0 };
+        trial.tracerStats_.beforeMass = 3.0f;
+        trial.tracerStats_.afterMass = 4.0f;
+        trial.tracerStats_.substeps = 7;
+        const auto beforeU = trial.u_, beforeV = trial.v_, beforePressure = trial.pressure_;
+        if( trial.commitIntervalTracer( empty, *cycle, chainMap, chainPanels, 1.0 ) ||
+            trial.tracerMass_ != empty || trial.tracerStats_.beforeMass != 3.0f ||
+            trial.tracerStats_.afterMass != 4.0f || trial.tracerStats_.substeps != 7 ||
+            trial.u_ != beforeU || trial.v_ != beforeV || trial.pressure_ != beforePressure )
+            throw std::runtime_error( "R4bi rejected field interval modified state" );
+        const std::vector<double> simpleStart{ 1.0, 1.0 };
+        const auto fieldRepair = fluidDetail::repairClosingTransport( simpleStart,
+            { 0.5, 1.5 }, {{ 0, 1, 0.5 }} );
+        trial.tracerMass_ = { 2.0, 0.0 };
+        trial.tracerEnabled_ = false;
+        if( !fieldRepair || trial.commitIntervalTracer( simpleStart, *fieldRepair, {}, {}, 0.0 ) ||
+            trial.tracerMass_ != std::vector<double>{ 2.0, 0.0 } ||
+            trial.tracerStats_.substeps != 7 )
+            throw std::runtime_error( "R4bi disabled field interval modified state" );
+        trial.tracerEnabled_ = true;
+        if( !trial.commitIntervalTracer( simpleStart, *fieldRepair, {}, {}, 0.0 ) ||
+            trial.tracerMass_ != std::vector<double>{ 1.0, 1.0 } ||
+            trial.tracerStats_.beforeMass != 2.0f || trial.tracerStats_.afterMass != 2.0f ||
+            trial.tracerStats_.substeps != 1 ||
+            trial.u_ != beforeU || trial.v_ != beforeV || trial.pressure_ != beforePressure )
+            throw std::runtime_error( "R4bi field interval commit regression" );
+        std::puts( "R4bi field interval commit regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
@@ -3555,6 +3587,28 @@ struct fluidStateTraceProbe2
         auto computed = consumeHybridTracer( field, candidate, repair, mapping, startVolume, outgoing,
             adaptivePanels, history.hybrid );
         auto& [mass, volume, panels, maxPasses, totalPasses, unserved, transferError] = computed;
+
+        // The accepted pressure candidate now reaches actual field-owned
+        // scalar storage through the private complete-only entry point.
+        // Preserve the surrounding research trajectory: this copy is not
+        // committed to World or the live pressure/geometry state.
+        fluidField2 accepted = field;
+        accepted.tracerEnabled_ = true;
+        accepted.tracerMass_ = history.hybrid;
+        const bool committed = accepted.commitIntervalTracer( startVolume, repair, mapping,
+            candidate.geometricPanels, candidate.geometricWeightSum );
+        if( committed != ( unserved == 0.0 ) ||
+            accepted.tracerMass_ != ( committed ? mass : history.hybrid ) ||
+            accepted.u_ != field.u_ || accepted.v_ != field.v_ ||
+            accepted.pressure_ != field.pressure_ ||
+            accepted.cellFluidFraction_ != field.cellFluidFraction_ ||
+            accepted.previousCellFluidFraction_ != field.previousCellFluidFraction_ ||
+            accepted.uOpenFraction_ != field.uOpenFraction_ || accepted.vOpenFraction_ != field.vOpenFraction_ )
+            throw std::runtime_error( "R4bi field interval handoff differs" );
+        if( committed && accepted.tracerStats_.substeps != panels )
+            throw std::runtime_error( "R4bi field panel count differs" );
+        if( !committed )
+            throw std::runtime_error( "R4bi historical accepted interval not fully served" );
         if( adaptivePanels == 1 && history.hybrid == history.adaptive && mass != adaptiveResult.mass )
             throw std::runtime_error( "R4bb identical fast-path input differs" );
 
@@ -3626,7 +3680,7 @@ struct fluidStateTraceProbe2
         emit( ".unserved", unserved ); emit( ".transferError", transferError );
         emit( ".modelGap", modelGap ); emit( ".volumeError", volumeError ); emit( ".massError", massError );
         emit( ".peakConcentration", peak ); emit( ".trapped", trapped ); emit( ".deltaL1", deltaL1 );
-        history.hybrid = std::move( mass );
+        history.hybrid = std::move( accepted.tracerMass_ );
         if( history.intervals + 1 == optimizedContinuationIntervals )
             appendVector( trace, key + ".mass", history.hybrid );
         std::printf( "R4bb interval%d panels %d maxPasses %d totalPasses %d unserved %.17g "
