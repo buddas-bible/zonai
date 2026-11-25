@@ -4579,6 +4579,74 @@ struct fluidStateTraceProbe2
                     std::printf( "R4af timing interval=%d variant=%d linear_ms=%.6f pressure_ms=%.6f\n",
                         index, variant, trialTiming.linearMs, elapsedMs( trialStart, trialEnd ) );
             }
+            // R4ce: paired full solve+commit measurements on the same frozen
+            // input, outside the legacy forward timing and strict trace.
+            if( timing && optimized && ( index == 43 || index == 64 ) )
+            {
+                constexpr int repeats = 4;
+                std::array<double, repeats> integratedTimes{}, stagedTimes{};
+                fluidField2 seed = forward;
+                seed.tracerEnabled_ = true;
+                seed.tracerMass_.resize( startFraction.size() );
+                for( std::size_t j = 0; j < startFraction.size(); ++j )
+                    seed.tracerMass_[j] = area * startFraction[j] * ( 1.0 + ( j % 7 ) / 8.0 );
+                for( int repeat = 0; repeat < repeats; ++repeat )
+                {
+                    fluidField2 integrated = seed, staged = seed;
+                    std::vector<fluidObstacleForce2> integratedFeedback( candidate.feedback.size() ),
+                        stagedFeedback( candidate.feedback.size() );
+                    continuationPressure stagedCandidate;
+                    std::string stagedTrace;
+                    const auto runIntegrated = [&]
+                    {
+                        const auto begin = benchmarkClock::now();
+                        const bool accepted = integrated.solveAndCommitIntervalPressure(
+                            {}, laggedField.pressure_, laggedLoad, integratedFeedback );
+                        integratedTimes[repeat] = elapsedMs( begin, benchmarkClock::now() );
+                        if( !accepted ) throw std::runtime_error( "R4ce integrated benchmark rejected" );
+                    };
+                    const auto runStaged = [&]
+                    {
+                        const auto begin = benchmarkClock::now();
+                        captureSpaceTimeProjection( staged, laggedField, laggedLoad, stagedTrace,
+                            splitKey + ".projection", 16, splitKey + ".volume", false,
+                            16, splitKey + ".topology", 0.0, &stagedCandidate, 0, true,
+                            nullptr, 1.0e-10, true, {}, true, true, true, 0.0, true );
+                        const bool accepted = staged.commitIntervalPressureCandidate( stagedCandidate,
+                            stagedCandidate.geometricPanels, stagedCandidate.geometricWeightSum, stagedFeedback );
+                        stagedTimes[repeat] = elapsedMs( begin, benchmarkClock::now() );
+                        if( !accepted ) throw std::runtime_error( "R4ce staged benchmark rejected" );
+                    };
+                    // Balance first/second execution order without randomizing
+                    // any numerical work or including the input copies.
+                    if( repeat % 2 == 0 ) { runIntegrated(); runStaged(); }
+                    else { runStaged(); runIntegrated(); }
+                    if( integrated.u_ != staged.u_ || integrated.v_ != staged.v_ ||
+                        integrated.pressure_ != staged.pressure_ || staged.pressure_ != candidate.pressure ||
+                        integrated.tracerMass_ != staged.tracerMass_ ||
+                        integrated.tracerStats_.substeps != staged.tracerStats_.substeps ||
+                        integrated.cellFluidFraction_ != seed.cellFluidFraction_ ||
+                        staged.cellFluidFraction_ != seed.cellFluidFraction_ ||
+                        integrated.previousCellFluidFraction_ != seed.previousCellFluidFraction_ ||
+                        staged.previousCellFluidFraction_ != seed.previousCellFluidFraction_ ||
+                        integrated.uOpenFraction_ != seed.uOpenFraction_ || staged.uOpenFraction_ != seed.uOpenFraction_ ||
+                        integrated.vOpenFraction_ != seed.vOpenFraction_ || staged.vOpenFraction_ != seed.vOpenFraction_ )
+                        throw std::runtime_error( "R4ce matched benchmark state differs" );
+                    for( std::size_t j = 0; j < integratedFeedback.size(); ++j )
+                        if( integratedFeedback[j].force.x != stagedFeedback[j].force.x ||
+                            integratedFeedback[j].force.y != stagedFeedback[j].force.y ||
+                            integratedFeedback[j].torque != stagedFeedback[j].torque )
+                            throw std::runtime_error( "R4ce matched benchmark feedback differs" );
+                    std::printf( "R4ce timing interval=%d pair=%d integrated_first=%d integrated_ms=%.6f "
+                        "staged_fixture_ms=%.6f\n", index, repeat, static_cast<int>( repeat % 2 == 0 ),
+                        integratedTimes[repeat], stagedTimes[repeat] );
+                }
+                std::sort( integratedTimes.begin(), integratedTimes.end() );
+                std::sort( stagedTimes.begin(), stagedTimes.end() );
+                std::printf( "R4ce median interval=%d pairs=%d integrated_ms=%.6f staged_fixture_ms=%.6f\n",
+                    index, repeats, 0.5 * ( integratedTimes[1] + integratedTimes[2] ),
+                    0.5 * ( stagedTimes[1] + stagedTimes[2] ) );
+            }
             const auto trialsEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             const double trialsMs = timing ? elapsedMs( pressureEnd, trialsEnd ) : 0.0;
             double gap = 0.0, negative = 0.0, unsupported = 0.0;
