@@ -1306,7 +1306,7 @@ struct fluidStateTraceProbe2
     // call the fluid step. No copy of live World contact/cache history.
     static void captureWorldPressureResponse( const fluidField2& before,
         std::span<const fluidObstacleForce2> baselineFeedback,
-        const std::vector<fluidField2::coupledBodyResponse>& candidate,
+        const std::vector<fluidDetail::intervalPressureResponse>& candidate,
         std::string& trace, const std::string& key )
     {
         using namespace sandbox;
