@@ -12,6 +12,22 @@ namespace zonai::fluidDetail
 using intervalPressureMultiply = std::function<void( const std::vector<double>&, std::vector<double>& )>;
 using intervalPressureGauge = std::function<void( std::vector<double>& )>;
 
+// Canonical interior face order and metadata retained for endpoint reconstruction.
+struct intervalPressureEdge
+{
+    int first, second;
+    double a, velocity;
+    bool isU;
+    int index;
+};
+
+// Internal kernels: caller supplies valid graph indices, matching extents,
+// positive component counts and nonaliasing scratch/output vectors.
+void projectIntervalPressureGauge( std::span<double> values, std::span<const int> parent,
+    std::span<const int> count, std::span<double> sums );
+void multiplyIntervalPressureGraph( std::span<const intervalPressureEdge> edges,
+    std::span<const double> pressure, std::span<double> out );
+
 struct intervalPressureResult
 {
     std::vector<double> pressure, projectedProduct;
