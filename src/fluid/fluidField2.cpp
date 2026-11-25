@@ -1,4 +1,5 @@
 #include "fluid/fluidField2.h"
+#include "fluid/fluidTransport2.h"
 
 #include "collision/distance2.h"
 #include "math/deterministicMath.h"
@@ -2653,6 +2654,46 @@ void fluidField2::transportTracer( float timeStep )
                 trapped += tracerMass_[cellIndex( x, y )];
     tracerStats_.trappedMass = static_cast<float>( trapped );
     tracerStats_.afterMass = getTracerMass();
+}
+
+bool fluidField2::commitIntervalTracer(
+    const std::vector<double>& startVolume, const fluidDetail::transportRepairResult& repair,
+    const std::vector<fluidDetail::transportFaceSample>& mapping,
+    const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum )
+{
+    if( !tracerEnabled_ ) return false;
+    if( startVolume.size() != cellFluidFraction_.size() ||
+        tracerMass_.size() != cellFluidFraction_.size() )
+        throw std::invalid_argument( "fluidField2: interval tracer extent mismatch" );
+    for( float fraction : cellFluidFraction_ )
+        if( !std::isfinite( fraction ) || fraction < 0.0f || fraction > 1.0f )
+            throw std::invalid_argument( "fluidField2: invalid interval endpoint fraction" );
+
+    const double h = cellSize_, area = h * h;
+    auto result = fluidDetail::consumeHybridTransport( repair, startVolume, tracerMass_,
+        area, mapping, sampledPanels, weightSum );
+    if( !result ) return false;
+
+    double after = 0.0, trapped = 0.0;
+    for( std::size_t i = 0; i < result->mass.size(); ++i )
+    {
+        after += result->mass[i];
+        if( cellFluidFraction_[i] == 0.0f ) trapped += result->mass[i];
+    }
+    fluidTracerStats2 stats{};
+    stats.beforeMass = getTracerMass();
+    stats.afterMass = static_cast<float>( after );
+    stats.trappedMass = static_cast<float>( trapped );
+    // Count executed time panels. Legacy swept-remap and CFL statistics
+    // do not describe this interval path and are not populated.
+    stats.substeps = result->panels;
+    if( !std::isfinite( stats.beforeMass ) || !std::isfinite( stats.afterMass ) ||
+        !std::isfinite( stats.trappedMass ) )
+        throw std::runtime_error( "fluidField2: interval tracer statistics overflow" );
+
+    tracerMass_.swap( result->mass );
+    tracerStats_ = stats;
+    return true;
 }
 
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
