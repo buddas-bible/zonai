@@ -23,6 +23,7 @@ struct transportPanel;
 struct intervalPressurePoseMotion;
 struct intervalPressureQuadrature;
 struct intervalPressureGeometryIntegral;
+struct intervalPressureGeometryPreparation;
 }
 
 
@@ -839,6 +840,9 @@ private:
         std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
         const fluidDetail::intervalPressureQuadrature& quadrature,
         fluidDetail::intervalPressureGeometryIntegral& integral ) const;
+    // Prepare a complete geometry integral without changing the frozen field.
+    [[nodiscard]] fluidDetail::intervalPressureGeometryPreparation prepareIntervalPressureGeometry(
+        int samples, int endpointDepth, bool adaptiveEndpoint, bool refineEndpointFaces ) const;
     void remapExposedFaces();
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
