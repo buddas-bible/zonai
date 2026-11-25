@@ -3098,6 +3098,43 @@ bool fluidField2::commitIntervalPressureCandidate(
     return true;
 }
 
+bool fluidField2::solveAndCommitIntervalPressure(
+    const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
+    std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback )
+{
+    if( !tracerEnabled_ ) return false;
+    if( options.linear.responseScale != 0.0 || options.correctionBudget < 0 || options.correctionBudget > 3 ||
+        !volumeSourceValid_ || baselineFeedback.size() != frozenPressureObstacles_.size() ||
+        feedback.size() != frozenPressureObstacles_.size() )
+        throw std::invalid_argument( "fluidField2: invalid field-only interval solve input" );
+
+    auto prepared = prepareIntervalPressureGeometry( options.samples, options.endpointDepth,
+        options.adaptiveEndpoint, options.refineEndpointFaces );
+    const auto& integral = prepared.integral;
+    // Refined quadrature must recover every detected missing cell/face.
+    for( const auto& f : prepared.missedFaces )
+    {
+        const int index = f.isU ? uIndex( f.x, f.y ) : vIndex( f.x, f.y );
+        if( !( ( f.isU ? integral.meanU : integral.meanV )[index] > 0.0 ) ) return false;
+    }
+    for( int i : prepared.missed )
+    {
+        const int x = i % width_, y = i / width_;
+        const double opening = integral.meanU[uIndex( x, y )] + integral.meanU[uIndex( x + 1, y )] +
+            integral.meanV[vIndex( x, y )] + integral.meanV[vIndex( x, y + 1 )];
+        if( !( integral.fraction[i] > 0.0 && opening > 0.0 ) ) return false;
+    }
+
+    auto linear = solvePreparedIntervalPressure( integral, options.linear, seed );
+    if( !linear.solution || linear.rhsResult.failedComponent >= 0 ) return false;
+    const fluidDetail::intervalPressureOperator op( linear.graph, integral.coefficients, linear.bodies,
+        linear.force, linear.sums, options.linear.responseScale, options.linear.skipFixedBodyProducts );
+    const auto defect = correctIntervalPressureDefect( op, linear.solution->pressure,
+        baselineFeedback, -1, options.correctionBudget );
+    const auto candidate = buildIntervalPressureCandidate( integral, linear, defect, true );
+    return commitIntervalPressureCandidate( candidate, integral.transportPanels, integral.weightSum, feedback );
+}
+
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
     std::span<fluidObstacleForce2> feedback, int pressureIterations )
 {
