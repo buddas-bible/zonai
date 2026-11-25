@@ -2249,6 +2249,47 @@ fluidDetail::intervalPressureGeometryPreparation fluidField2::prepareIntervalPre
     return result;
 }
 
+fluidDetail::intervalPressureLinearState fluidField2::solvePreparedIntervalPressure(
+    const fluidDetail::intervalPressureGeometryIntegral& integral,
+    const fluidDetail::intervalPressureLinearOptions& options, std::span<const float> seed ) const
+{
+    const double h = cellSize_, dt = frozenPressureTimeStep_;
+    const auto& finish = frozenPressureObstacles_;
+    const std::size_t n = cellFluidFraction_.size(), owners = finish.size();
+    if( !volumeSourceValid_ || !std::isfinite( options.closingVolumeRelativeTolerance ) ||
+        options.closingVolumeRelativeTolerance < 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid prepared linear solve input" );
+
+    fluidDetail::intervalPressureLinearState state;
+    state.graph = fluidDetail::buildIntervalPressureGraph( width_, height_, h, dt,
+        integral.fraction, previousCellFluidFraction_, cellFluidFraction_,
+        { integral.meanU, u_, uOpenFraction_ }, { integral.meanV, v_, vOpenFraction_ } );
+    state.rhs.resize( n );
+    state.sums.resize( n );
+    state.scale = h * h / dt;
+    state.rhsResult = fluidDetail::buildIntervalPressureRhs( state.graph, cellFluidFraction_,
+        state.scale, options.volumeWeightedCompatibility, state.rhs, state.sums );
+    if( state.rhsResult.failedComponent >= 0 ) return state;
+
+    state.force.resize( owners );
+    state.bodies.resize( owners );
+    for( std::size_t j = 0; j < owners; ++j )
+        state.bodies[j] = { static_cast<double>( finish[j].inverseMass ),
+            static_cast<double>( finish[j].inverseInertia ) };
+    const fluidDetail::intervalPressureOperator op( state.graph, integral.coefficients, state.bodies,
+        state.force, state.sums, options.responseScale, options.skipFixedBodyProducts );
+    op.addDiagonal( state.graph.diagonal );
+    if( options.closingVolumeRelativeTolerance > 0.0 )
+        for( std::size_t i = 0; i < n; ++i )
+            if( state.graph.parent[i] >= 0 && previousCellFluidFraction_[i] > 0.0f &&
+                cellFluidFraction_[i] == 0.0f )
+                state.closingRows.emplace_back( i, std::max( 1.0e-18,
+                    options.closingVolumeRelativeTolerance * h * h * previousCellFluidFraction_[i] ) );
+    state.solution = fluidDetail::solveIntervalPressure( state.rhs, op, seed, options.warmStart,
+        dt, options.relativeSquaredTolerance, state.closingRows );
+    return state;
+}
+
 void fluidField2::remapExposedFaces()
 {
     // 새로 열린 fluid-fluid face가 이전 rigid boundary의 속도를 그대로 상속하지 않도록
