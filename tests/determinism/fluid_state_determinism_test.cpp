@@ -4380,6 +4380,25 @@ struct fluidStateTraceProbe2
                             result->uOpenFraction_ != staged.uOpenFraction_ ||
                             result->vOpenFraction_ != staged.vOpenFraction_ )
                             throw std::runtime_error( "R4cl complete interval step differs from staged reference" );
+                        // Reject a stale source fraction after advection and
+                        // geometry rebuilding on the disposable trial.
+                        fluidField2 mismatched = stepSource;
+                        mismatched.cellFluidFraction_[0] = mismatched.cellFluidFraction_[0] == 0.0f ? 1.0f : 0.0f;
+                        const auto mismatchFraction = mismatched.cellFluidFraction_;
+                        bool mismatchedRejected = false;
+                        try
+                        {
+                            (void)mismatched.advanceIntervalPressureEndpoint( dt, start, predicted,
+                                options, laggedField.pressure_, laggedLoad, endpointFeedback );
+                        }
+                        catch( const std::runtime_error& ) { mismatchedRejected = true; }
+                        if( !mismatchedRejected || mismatched.cellFluidFraction_ != mismatchFraction ||
+                            mismatched.u_ != stepU || mismatched.v_ != stepV ||
+                            mismatched.pressure_ != stepPressure || mismatched.tracerMass_ != sourceMass ||
+                            mismatched.previousCellFluidFraction_ != stepHistory ||
+                            !unchangedStep() || !unchangedFeedback() )
+                            throw std::runtime_error( "R4cm rejected geometry changed source or feedback" );
+                        std::puts( "R4cm single trial geometry rejection preserved source" );
                         bool invalidStepRejected = false;
                         try
                         {
