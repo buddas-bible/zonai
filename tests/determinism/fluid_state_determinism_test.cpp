@@ -4137,7 +4137,8 @@ struct fluidStateTraceProbe2
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
         std::vector<float>* forwardPressureHistory = nullptr, bool auditEndpoint = false,
-        forwardEndpointState* committed = nullptr, bool staggered = false, bool optimized = false )
+        forwardEndpointState* committed = nullptr, bool staggered = false, bool optimized = false,
+        const fluidField2* beforeAdvection = nullptr )
     {
         const auto totalStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         using namespace sandbox;
@@ -4351,6 +4352,50 @@ struct fluidStateTraceProbe2
                         !unchangedSource() || !unchangedFeedback() )
                         throw std::runtime_error( "R4ck disabled endpoint changed state" );
                     std::printf( "R4ck isolated endpoint interval%d matches staged reference\n", index );
+
+                    if( beforeAdvection )
+                    {
+                        fluidField2 stepSource = *beforeAdvection;
+                        stepSource.tracerEnabled_ = true;
+                        stepSource.tracerMass_ = sourceMass;
+                        const auto stepU = stepSource.u_, stepV = stepSource.v_;
+                        const auto stepFraction = stepSource.cellFluidFraction_;
+                        const auto stepPressure = stepSource.pressure_;
+                        const auto stepHistory = stepSource.previousCellFluidFraction_;
+                        const auto unchangedStep = [&]()
+                        {
+                            return stepSource.u_ == stepU && stepSource.v_ == stepV &&
+                                stepSource.cellFluidFraction_ == stepFraction &&
+                                stepSource.previousCellFluidFraction_ == stepHistory &&
+                                stepSource.pressure_ == stepPressure && stepSource.tracerMass_ == sourceMass;
+                        };
+                        const auto result = stepSource.advanceIntervalPressureEndpoint( dt, start, predicted,
+                            options, laggedField.pressure_, laggedLoad, endpointFeedback );
+                        if( !result || !unchangedStep() || !unchangedFeedback() ||
+                            result->u_ != staged.u_ || result->v_ != staged.v_ ||
+                            result->pressure_ != staged.pressure_ || result->tracerMass_ != staged.tracerMass_ ||
+                            result->tracerStats_.substeps != staged.tracerStats_.substeps ||
+                            result->cellFluidFraction_ != staged.cellFluidFraction_ ||
+                            result->previousCellFluidFraction_ != startFraction ||
+                            result->uOpenFraction_ != staged.uOpenFraction_ ||
+                            result->vOpenFraction_ != staged.vOpenFraction_ )
+                            throw std::runtime_error( "R4cl complete interval step differs from staged reference" );
+                        bool invalidStepRejected = false;
+                        try
+                        {
+                            (void)stepSource.advanceIntervalPressureEndpoint( 0.0f, start, predicted,
+                                options, laggedField.pressure_, laggedLoad, endpointFeedback );
+                        }
+                        catch( const std::invalid_argument& ) { invalidStepRejected = true; }
+                        if( !invalidStepRejected || !unchangedStep() || !unchangedFeedback() )
+                            throw std::runtime_error( "R4cl invalid step changed state" );
+                        stepSource.tracerEnabled_ = false;
+                        if( stepSource.advanceIntervalPressureEndpoint( dt, start, predicted,
+                                options, laggedField.pressure_, laggedLoad, endpointFeedback ) ||
+                            !unchangedStep() || !unchangedFeedback() )
+                            throw std::runtime_error( "R4cl disabled step changed state" );
+                        std::printf( "R4cl complete interval%d matches staged advection and solve\n", index );
+                    }
                     const double stagedProjectionMs = elapsedMs( pressureStart, pressureEnd );
                     const double stagedCommitMs = elapsedMs( stagedStart, stagedEnd );
                     const double integratedMs = elapsedMs( integratedStart, integratedEnd );
@@ -5659,6 +5704,7 @@ struct fluidStateTraceProbe2
                     throw std::runtime_error( "R4ak interval65 full coverage regression" );
             }
             fluidField2 pre = state.field;
+            std::optional<fluidField2> beforeAdvection;
             if( step > 0 )
             {
                 windTime += dt;
@@ -5666,6 +5712,10 @@ struct fluidStateTraceProbe2
                     std::min( 2.5f, 0.25f * pre.getWidth() * pre.getCellSize() );
                 pre.addVelocity( { sourceX, 0.0f }, { 8.0f * dt,
                     0.5f * 8.0f * dt * rot2::FromRadians( 1.7f * windTime ).s }, 1.7f );
+                // Interval 43 is already advected in the frozen fixture.
+                // Capture the real pre-advection input at the closing-cell case.
+                if( optimized && benchmarkRepeat < 0 && first + step == 64 )
+                    beforeAdvection.emplace( pre );
                 // Advect on the actual start geometry, before the forward
                 // pressure/geometry trial. No discarded pressure solve.
                 pre.applyAdvectionBoundaries( state.poses );
@@ -5681,7 +5731,8 @@ struct fluidStateTraceProbe2
             const auto prepared = benchmarkRepeat >= 0 ? benchmarkClock::now() : benchmarkClock::time_point{};
             captureForwardPredictor( pre, seed, poses, load, trace, first + step,
                 0.75, 0, 16, true, benchmarkRepeat >= 0 ? &timing : nullptr,
-                1.0e-10, true, nullptr, true, &state, staggered, optimized );
+                1.0e-10, true, nullptr, true, &state, staggered, optimized,
+                beforeAdvection ? &*beforeAdvection : nullptr );
             if( optimized )
             {
                 // R4ah: audit actual carried state, not the predictor's
