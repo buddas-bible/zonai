@@ -912,6 +912,12 @@ private:
         std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish,
         const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
         std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback ) const;
+    // Advance a trial on start geometry after caller-applied forces.
+    // Accepted endpoint and lagged load remain separate from the live World.
+    [[nodiscard]] std::optional<fluidField2> advanceIntervalPressureEndpoint( float timeStep,
+        std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish,
+        const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
+        std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback ) const;
     void remapTracerSwept();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
