@@ -3235,6 +3235,34 @@ std::optional<fluidField2> fluidField2::solveIntervalPressureEndpoint( float tim
     return std::optional<fluidField2>( std::move( endpoint ) );
 }
 
+std::optional<fluidField2> fluidField2::advanceIntervalPressureEndpoint( float timeStep,
+    std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish,
+    const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
+    std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback ) const
+{
+    if( !tracerEnabled_ ) return std::nullopt;
+    if( !cutCellProjectionEnabled_ || !std::isfinite( timeStep ) || timeStep <= 0.0f ||
+        start.size() != finish.size() || baselineFeedback.size() != finish.size() ||
+        feedback.size() != finish.size() || options.linear.responseScale != 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid trial step input" );
+
+    fluidField2 advected = *this;
+    advected.setPrePressureSnapshotObserver( {} );
+    advected.determinismStageObserver_ = {};
+    advected.applyAdvectionBoundaries( start );
+    advected.advectionStats_ = {};
+    advected.advectionStats_.conservative = advected.conservativeAdvectionEnabled_;
+    advected.advectionStats_.before = advected.getAdvectionFaceMomentum();
+    advected.advectVelocity( timeStep );
+    advected.applyAdvectionBoundaries( start );
+    advected.advectionStats_.after = advected.getAdvectionFaceMomentum();
+
+    // No legacy swept tracer remap: the accepted interval transport owns
+    // scalar mass. Endpoint preparation verifies the source cell geometry.
+    return advected.solveIntervalPressureEndpoint( timeStep, start, finish,
+        options, seed, baselineFeedback, feedback );
+}
+
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
     std::span<fluidObstacleForce2> feedback, int pressureIterations )
 {
