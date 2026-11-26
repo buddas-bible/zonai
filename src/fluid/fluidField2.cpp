@@ -2166,23 +2166,29 @@ void fluidField2::setIntervalPressureHistory( float timeStep, std::span<const fl
 fluidField2 fluidField2::prepareIntervalPressureEndpoint( float timeStep,
     std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish ) const
 {
+    fluidField2 endpoint = *this;
+    endpoint.prepareIntervalPressureEndpointInPlace( timeStep, cellFluidFraction_, start, finish );
+    return endpoint;
+}
+
+void fluidField2::prepareIntervalPressureEndpointInPlace( float timeStep,
+    std::span<const float> startFraction, std::span<const fluidShapeObstacle2> start,
+    std::span<const fluidShapeObstacle2> finish )
+{
     if( !cutCellProjectionEnabled_ || !std::isfinite( timeStep ) || timeStep <= 0.0f ||
-        start.size() != finish.size() )
+        start.size() != finish.size() || startFraction.size() != cellFluidFraction_.size() )
         throw std::invalid_argument( "interval pressure: invalid endpoint preparation input" );
 
-    fluidField2 endpoint = *this;
-    endpoint.setPrePressureSnapshotObserver( {} );
-    endpoint.determinismStageObserver_ = {};
-    if( !endpoint.rebuildIntervalPressureGeometry( start ) ||
-        endpoint.cellFluidFraction_ != cellFluidFraction_ )
+    setPrePressureSnapshotObserver( {} );
+    determinismStageObserver_ = {};
+    if( !rebuildIntervalPressureGeometry( start ) ||
+        !std::equal( cellFluidFraction_.begin(), cellFluidFraction_.end(), startFraction.begin() ) )
         throw std::runtime_error( "interval pressure: start geometry differs from source" );
-    if( !endpoint.rebuildIntervalPressureGeometry( finish ) )
+    if( !rebuildIntervalPressureGeometry( finish ) )
         throw std::runtime_error( "interval pressure: endpoint geometry not analytic" );
-    endpoint.setIntervalPressureHistory( timeStep, cellFluidFraction_, start, finish );
-    // Keep the incoming advected MAC trial independent of endpoint motion.
-    endpoint.u_ = u_;
-    endpoint.v_ = v_;
-    return endpoint;
+    setIntervalPressureHistory( timeStep, startFraction, start, finish );
+    // Geometry rebuilds do not write MAC velocities or tracer mass.
+    // Retain the incoming advected trial without copying its buffers.
 }
 
 void fluidField2::integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
@@ -3259,8 +3265,11 @@ std::optional<fluidField2> fluidField2::advanceIntervalPressureEndpoint( float t
 
     // No legacy swept tracer remap: the accepted interval transport owns
     // scalar mass. Endpoint preparation verifies the source cell geometry.
-    return advected.solveIntervalPressureEndpoint( timeStep, start, finish,
-        options, seed, baselineFeedback, feedback );
+    advected.prepareIntervalPressureEndpointInPlace( timeStep, cellFluidFraction_, start, finish );
+    if( !advected.solveAndCommitIntervalPressure( options, seed, baselineFeedback, feedback ) )
+        return std::nullopt;
+    static_assert( std::is_nothrow_move_constructible_v<fluidField2> );
+    return std::optional<fluidField2>( std::move( advected ) );
 }
 
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
