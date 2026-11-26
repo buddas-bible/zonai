@@ -850,6 +850,10 @@ private:
     // Caller owns the World cadence and stable obstacle ordering.
     [[nodiscard]] fluidField2 prepareIntervalPressureEndpoint( float timeStep,
         std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish ) const;
+    // Mutate only a disposable trial. Start fractions and poses belong
+    // to the separate source/caller, never the trial's mutable buffers.
+    void prepareIntervalPressureEndpointInPlace( float timeStep, std::span<const float> startFraction,
+        std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish );
     // Use distinct isolated scratch fields; preserve the frozen source.
     void integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
         std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
