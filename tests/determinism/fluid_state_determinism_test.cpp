@@ -4796,6 +4796,93 @@ struct fluidStateTraceProbe2
                     index, repeats, 0.5 * ( integratedTimes[1] + integratedTimes[2] ),
                     0.5 * ( stagedTimes[1] + stagedTimes[2] ) );
             }
+            // R4cn: compare identical full advances, retaining the former
+            // two-copy composition as a test-only reference. Both paths use
+            // the current kernels, with no staged trace overhead.
+            if( timing && optimized && index == 64 )
+            {
+                if( !beforeAdvection ) throw std::runtime_error( "R4cn missing start fixture" );
+                fluidField2 seed = *beforeAdvection;
+                seed.tracerEnabled_ = true;
+                seed.tracerMass_.resize( startFraction.size() );
+                for( std::size_t j = 0; j < startFraction.size(); ++j )
+                    seed.tracerMass_[j] = area * startFraction[j] * ( 1.0 + ( j % 7 ) / 8.0 );
+                const auto seedU = seed.u_, seedV = seed.v_;
+                const auto seedMass = seed.tracerMass_;
+                const auto seedPressure = seed.pressure_;
+                const fluidDetail::intervalPressureStepOptions options;
+                for( int repeat = 0; repeat < 4; ++repeat )
+                {
+                    std::optional<fluidField2> single, doubled;
+                    std::vector<fluidObstacleForce2> singleFeedback( laggedLoad.size() ),
+                        doubleFeedback( laggedLoad.size() );
+                    double singleMs = 0.0, doubleMs = 0.0;
+                    const auto runSingle = [&]()
+                    {
+                        const auto begin = benchmarkClock::now();
+                        single = seed.advanceIntervalPressureEndpoint( dt, start, predicted,
+                            options, laggedField.pressure_, laggedLoad, singleFeedback );
+                        singleMs = elapsedMs( begin, benchmarkClock::now() );
+                    };
+                    const auto runDouble = [&]()
+                    {
+                        const auto begin = benchmarkClock::now();
+                        {
+                            fluidField2 trial = seed;
+                            trial.setPrePressureSnapshotObserver( {} );
+                            setStageObserver( trial, {} );
+                            trial.applyAdvectionBoundaries( start );
+                            trial.advectionStats_ = {};
+                            trial.advectionStats_.conservative = trial.conservativeAdvectionEnabled_;
+                            trial.advectionStats_.before = trial.getAdvectionFaceMomentum();
+                            trial.advectVelocity( dt );
+                            trial.applyAdvectionBoundaries( start );
+                            trial.advectionStats_.after = trial.getAdvectionFaceMomentum();
+                            doubled = trial.solveIntervalPressureEndpoint( dt, start, predicted,
+                                options, laggedField.pressure_, laggedLoad, doubleFeedback );
+                        }
+                        doubleMs = elapsedMs( begin, benchmarkClock::now() );
+                    };
+                    if( repeat % 2 == 0 ) { runSingle(); runDouble(); }
+                    else { runDouble(); runSingle(); }
+                    if( !single || !doubled || seed.u_ != seedU || seed.v_ != seedV ||
+                        seed.pressure_ != seedPressure || seed.tracerMass_ != seedMass ||
+                        single->u_ != doubled->u_ || single->v_ != doubled->v_ ||
+                        single->pressure_ != doubled->pressure_ || single->pressure_ != candidate.pressure ||
+                        single->tracerMass_ != doubled->tracerMass_ ||
+                        single->tracerStats_.substeps != doubled->tracerStats_.substeps ||
+                        single->cellFluidFraction_ != predictedFraction ||
+                        doubled->cellFluidFraction_ != predictedFraction ||
+                        single->previousCellFluidFraction_ != startFraction ||
+                        doubled->previousCellFluidFraction_ != startFraction ||
+                        single->uOpenFraction_ != doubled->uOpenFraction_ ||
+                        single->vOpenFraction_ != doubled->vOpenFraction_ )
+                        throw std::runtime_error( "R4cn matched full advance differs" );
+                    for( std::size_t j = 0; j < singleFeedback.size(); ++j )
+                        if( singleFeedback[j].force.x != doubleFeedback[j].force.x ||
+                            singleFeedback[j].force.y != doubleFeedback[j].force.y ||
+                            singleFeedback[j].torque != doubleFeedback[j].torque )
+                            throw std::runtime_error( "R4cn matched full advance feedback differs" );
+                    std::printf( "R4cn timing interval=%d pair=%d single_first=%d single_ms=%.6f double_ms=%.6f\n",
+                        index, repeat, static_cast<int>( repeat % 2 == 0 ), singleMs, doubleMs );
+                }
+                // Isolate the copy/destruction cost as a separate observation.
+                // Use a copy in an observable check; not allocator instrumentation.
+                for( int repeat = 0; repeat < 4; ++repeat )
+                {
+                    const auto begin = benchmarkClock::now();
+                    double checksum = 0.0;
+                    {
+                        fluidField2 copy = seed;
+                        checksum = copy.getTracerMass();
+                    }
+                    const auto end = benchmarkClock::now();
+                    if( checksum != seed.getTracerMass() )
+                        throw std::runtime_error( "R4cn copied mass differs" );
+                    std::printf( "R4cn copy interval=%d pair=%d copy_destroy_ms=%.6f\n",
+                        index, repeat, elapsedMs( begin, end ) );
+                }
+            }
             const auto trialsEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             const double trialsMs = timing ? elapsedMs( pressureEnd, trialsEnd ) : 0.0;
             double gap = 0.0, negative = 0.0, unsupported = 0.0;
@@ -5724,6 +5811,7 @@ struct fluidStateTraceProbe2
             }
             fluidField2 pre = state.field;
             std::optional<fluidField2> beforeAdvection;
+            double captureMs = 0.0;
             if( step > 0 )
             {
                 windTime += dt;
@@ -5733,8 +5821,13 @@ struct fluidStateTraceProbe2
                     0.5f * 8.0f * dt * rot2::FromRadians( 1.7f * windTime ).s }, 1.7f );
                 // Interval 43 is already advected in the frozen fixture.
                 // Capture the real pre-advection input at the closing-cell case.
-                if( optimized && benchmarkRepeat < 0 && first + step == 64 )
+                if( optimized && first + step == 64 )
+                {
+                    const auto captureStart = benchmarkRepeat >= 0 ? benchmarkClock::now() : benchmarkClock::time_point{};
                     beforeAdvection.emplace( pre );
+                    if( benchmarkRepeat >= 0 )
+                        captureMs = elapsedMs( captureStart, benchmarkClock::now() );
+                }
                 // Advect on the actual start geometry, before the forward
                 // pressure/geometry trial. No discarded pressure solve.
                 pre.applyAdvectionBoundaries( state.poses );
@@ -5823,10 +5916,11 @@ struct fluidStateTraceProbe2
             }
             if( benchmarkRepeat >= 0 )
             {
-                const double total = elapsedMs( stepStart, prepared ) + timing.totalMs;
+                const double prepareMs = elapsedMs( stepStart, prepared ) - captureMs;
+                const double total = prepareMs + timing.totalMs;
                 std::printf( "%s timing interval=%d repeat=%d prepare_ms=%.6f setup_ms=%.6f "
                     "quadrature_ms=%.6f linear_ms=%.6f pressure_ms=%.6f endpoint_ms=%.6f total_ms=%.6f\n",
-                    optimized ? "R4ag" : "R4ae", first + step, benchmarkRepeat, elapsedMs( stepStart, prepared ), timing.setupMs,
+                    optimized ? "R4ag" : "R4ae", first + step, benchmarkRepeat, prepareMs, timing.setupMs,
                     timing.quadratureMs, timing.linearMs, timing.pressureMs, timing.endpointMs, total );
             }
         }
