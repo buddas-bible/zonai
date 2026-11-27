@@ -727,6 +727,37 @@ jobs:
               print(f"R4cf interval={i} pairs=12 integrated_median_ms={integrated:.6f} staged_fixture_median_ms={staged:.6f}")
               report.append(f"| {i} | 12 | {integrated:.6f} | {staged:.6f} |")
           report.extend(["", "Staged timings include fixture diagnostics. These are research measurements, not a production speedup or a full World/Fluid Step benchmark."])
+          full_pattern = re.compile(r"R4cn timing interval=64 pair=(\d+) single_first=(\d+) single_ms=([\d.]+) double_ms=([\d.]+)")
+          copy_pattern = re.compile(r"R4cn copy interval=64 pair=(\d+) copy_destroy_ms=([\d.]+)")
+          full, copies = [], []
+          for line in Path("forward-cost.log").read_text().splitlines():
+              if line.startswith("R4cn timing "):
+                  m = full_pattern.fullmatch(line)
+                  assert m, f"Malformed full step timing: {line}"
+                  pair, first = map(int, m.groups()[:2])
+                  assert pair == len(full) % 4 and first == int(pair % 2 == 0)
+                  values = tuple(map(float, m.groups()[2:]))
+                  assert all(math.isfinite(v) and v >= 0 for v in values)
+                  full.append(values)
+              elif line.startswith("R4cn copy "):
+                  m = copy_pattern.fullmatch(line)
+                  assert m, f"Malformed copy timing: {line}"
+                  assert int(m[1]) == len(copies) % 4
+                  value = float(m[2])
+                  assert math.isfinite(value) and value >= 0
+                  copies.append(value)
+          assert len(full) == len(copies) == 12
+          single, double = map(statistics.median, zip(*full))
+          delta = statistics.median(b - a for a, b in full)
+          copy_ms = statistics.median(copies)
+          print(f"R4cn interval=64 pairs=12 single_median_ms={single:.6f} double_median_ms={double:.6f} paired_delta_median_ms={delta:.6f} copy_destroy_median_ms={copy_ms:.6f}")
+          report.extend([
+              "", "### R4cn full isolated advance (Release, interval 64)", "",
+              "| Pairs | Single trial (ms) | Two-copy reference (ms) | Paired delta (ms) | Copy + destruction (ms) |",
+              "| ---: | ---: | ---: | ---: | ---: |",
+              f"| 12 | {single:.6f} | {double:.6f} | {delta:.6f} | {copy_ms:.6f} |",
+              "", "Both paths use current kernels. Copy timing includes destruction and a mass query; no allocation counts, bytes, or full World Step cost are measured.",
+          ])
           with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
               summary.write("\n".join(report) + "\n")
           for i in range(43, 283):
